@@ -1,129 +1,211 @@
-import { useState } from 'react';
-import API from '../api/axios';
+import React, { useState } from 'react';
 
-export default function ProductCard({ product, onCartUpdated }) {
-  const [isHovered, setIsHovered] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState(null);
+const ProductCard = ({ product, onAddToCart, onCartUpdated }) => {
+  const [added, setAdded] = useState(false);
 
-  const showToast = (message, type = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 2500);
-  };
+  if (!product) return null;
 
-  const handleAddToCart = async () => {
-    setLoading(true);
-    try {
-      await API.post('/cart', { productId: product._id, quantity: 1 });
-      showToast('✨ Added to cart', 'success');
-      if (onCartUpdated) onCartUpdated();
-    } catch (err) {
-      const msg = err.response?.status === 401 
-        ? 'Please log in first' 
-        : err.response?.data?.message || 'Error adding item';
-      showToast(msg, 'error');
-    } finally {
-      setLoading(false);
+  const imageUrl =
+    product.primaryImage ||
+    product.image ||
+    (product.images && product.images[0]) ||
+    'https://images.unsplash.com/photo-1560343090-f0409e92791a?q=80&w=1000&auto=format&fit=crop';
+
+  const handleCartClick = (e) => {
+    e.stopPropagation();
+
+    // 1. Retrieve current cart from localStorage
+    const savedCart = JSON.parse(localStorage.getItem('aura_cart') || '[]');
+    const productId = product._id || product.id;
+
+    // 2. Check if product exists; increment quantity or append
+    const existingIndex = savedCart.findIndex(
+      (item) => (item._id || item.id) === productId
+    );
+
+    if (existingIndex > -1) {
+      savedCart[existingIndex].quantity = (savedCart[existingIndex].quantity || 1) + 1;
+    } else {
+      savedCart.push({ ...product, quantity: 1 });
     }
+
+    // 3. Persist to localStorage
+    localStorage.setItem('aura_cart', JSON.stringify(savedCart));
+
+    // 4. Trigger visual feedback on button
+    setAdded(true);
+    setTimeout(() => setAdded(false), 1200);
+
+    // 5. Notify parent components & trigger global event for Navbar
+    const handler = onAddToCart || onCartUpdated;
+    if (handler) {
+      handler(savedCart);
+    }
+    window.dispatchEvent(new Event('cartUpdated'));
+    window.dispatchEvent(new Event('storage'));
   };
 
   return (
-    <div
-      style={{
-        ...styles.card,
-        transform: isHovered ? 'translateY(-6px)' : 'translateY(0)',
-        borderColor: isHovered ? '#3f3f46' : '#27272a',
-        boxShadow: isHovered ? '0 12px 30px rgba(0,0,0,0.5)' : 'none',
+    <div 
+      className="group flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:shadow-md"
+      style={{ 
+        border: '1px solid #e5e7eb', 
+        borderRadius: '12px', 
+        overflow: 'hidden', 
+        backgroundColor: '#ffffff',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%'
       }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
     >
-      {toast && (
-        <div style={{ ...styles.toast, backgroundColor: toast.type === 'success' ? '#10b981' : '#ef4444' }}>
-          {toast.message}
-        </div>
-      )}
-
-      <div style={styles.imageWrapper}>
+      {/* Strictly Bounded Image Wrapper */}
+      <div 
+        style={{ 
+          width: '100%', 
+          height: '220px', 
+          overflow: 'hidden', 
+          position: 'relative', 
+          backgroundColor: '#f3f4f6' 
+        }}
+      >
         <img
-          src={product.imageUrl}
-          alt={product.name}
-          style={{
-            ...styles.image,
-            transform: isHovered ? 'scale(1.08)' : 'scale(1)',
+          src={imageUrl}
+          alt={product.name || 'Product'}
+          style={{ 
+            width: '100%', 
+            height: '100%', 
+            objectFit: 'cover', 
+            objectPosition: 'center',
+            display: 'block' 
+          }}
+          onError={(e) => {
+            e.target.onerror = null;
+            e.target.src =
+              'https://images.unsplash.com/photo-1560343090-f0409e92791a?q=80&w=1000&auto=format&fit=crop';
           }}
         />
-        <span style={styles.categoryBadge}>{product.category}</span>
+        {product.category && (
+          <span 
+            style={{ 
+              position: 'absolute',
+              top: '10px',
+              right: '10px',
+              backgroundColor: 'rgba(255, 255, 255, 0.9)', 
+              backdropFilter: 'blur(4px)',
+              padding: '4px 10px', 
+              borderRadius: '20px', 
+              fontSize: '11px', 
+              fontWeight: 600,
+              color: '#374151', 
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em'
+            }}
+          >
+            {product.category}
+          </span>
+        )}
       </div>
 
-      <div style={styles.body}>
-        <h3 style={styles.title}>{product.name}</h3>
-        <p style={styles.description}>{product.description}</p>
+      {/* Product Details */}
+      <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'space-between' }}>
+        <div>
+          <h3 
+            style={{ 
+              margin: '0 0 6px 0', 
+              fontSize: '16px', 
+              fontWeight: 600, 
+              color: '#111827',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis'
+            }}
+          >
+            {product.name}
+          </h3>
+          {product.description && (
+            <p 
+              style={{ 
+                fontSize: '12px', 
+                color: '#6b7280', 
+                margin: '0 0 14px 0',
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+                lineHeight: '1.4'
+              }}
+            >
+              {product.description}
+            </p>
+          )}
+        </div>
 
-        <div style={styles.footer}>
-          <div>
-            <span style={styles.currency}>$</span>
-            <span style={styles.price}>{product.price.toLocaleString()}</span>
-          </div>
+        {/* Action Bar with Price & Indigo/Blue Add to Cart Button */}
+        <div 
+          style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            marginTop: 'auto', 
+            paddingTop: '12px', 
+            borderTop: '1px solid #f3f4f6' 
+          }}
+        >
+          <span style={{ fontSize: '18px', fontWeight: 700, color: '#111827' }}>
+            ${product.price}
+          </span>
 
           <button
-            onClick={handleAddToCart}
-            disabled={product.stock <= 0 || loading}
-            style={product.stock > 0 ? styles.button : styles.buttonDisabled}
+            onClick={handleCartClick}
+            title="Add to Cart"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: added ? '#10b981' : '#6366f1',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '8px 14px',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'background-color 0.2s ease'
+            }}
+            onMouseOver={(e) => {
+              if (!added) e.currentTarget.style.backgroundColor = '#4f46e5';
+            }}
+            onMouseOut={(e) => {
+              if (!added) e.currentTarget.style.backgroundColor = '#6366f1';
+            }}
           >
-            {loading ? 'Adding...' : product.stock > 0 ? 'Add to Cart' : 'Sold Out'}
+            <svg 
+              width="15" 
+              height="15" 
+              viewBox="0 0 24 24" 
+              fill="none" 
+              stroke="currentColor" 
+              strokeWidth="2" 
+              strokeLinecap="round" 
+              strokeLinejoin="round"
+            >
+              {added ? (
+                <polyline points="20 6 9 17 4 12" />
+              ) : (
+                <>
+                  <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+                  <line x1="3" y1="6" x2="21" y2="6" />
+                  <path d="M16 10a4 4 0 0 1-8 0" />
+                </>
+              )}
+            </svg>
+            <span>{added ? 'Added!' : 'Add to Cart'}</span>
           </button>
         </div>
       </div>
     </div>
   );
-}
-
-const styles = {
-  card: {
-    backgroundColor: '#18181b',
-    border: '1px solid #27272a',
-    borderRadius: '16px',
-    overflow: 'hidden',
-    display: 'flex',
-    flexDirection: 'column',
-    transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-    position: 'relative',
-  },
-  imageWrapper: {
-    width: '100%',
-    height: '220px',
-    overflow: 'hidden',
-    position: 'relative',
-    backgroundColor: '#09090b',
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-    transition: 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
-  },
-  categoryBadge: {
-    position: 'absolute',
-    top: '12px',
-    left: '12px',
-    backgroundColor: 'rgba(9, 9, 11, 0.75)',
-    backdropFilter: 'blur(8px)',
-    color: '#d4d4d8',
-    fontSize: '0.7rem',
-    fontWeight: '700',
-    padding: '4px 10px',
-    borderRadius: '99px',
-    border: '1px solid rgba(255,255,255,0.1)',
-    textTransform: 'uppercase',
-  },
-  body: { padding: '1.25rem', display: 'flex', flexDirection: 'column', flexGrow: 1 },
-  title: { fontSize: '1.1rem', fontWeight: '700', color: '#f4f4f5', marginBottom: '6px' },
-  description: { fontSize: '0.85rem', color: '#a1a1aa', lineHeight: '1.4', flexGrow: 1, marginBottom: '16px' },
-  footer: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '12px', borderTop: '1px solid #27272a' },
-  currency: { fontSize: '0.9rem', color: '#6366f1', fontWeight: '700', marginRight: '2px' },
-  price: { fontSize: '1.3rem', fontWeight: '800', color: '#fff' },
-  button: { padding: '10px 18px', backgroundColor: '#6366f1', color: '#fff', border: 'none', borderRadius: '10px', fontSize: '0.85rem', fontWeight: '700', cursor: 'pointer', transition: 'background 0.2s' },
-  buttonDisabled: { padding: '10px 18px', backgroundColor: '#27272a', color: '#71717a', border: 'none', borderRadius: '10px', fontSize: '0.85rem', cursor: 'not-allowed' },
-  toast: { position: 'absolute', top: '12px', right: '12px', zIndex: 10, color: '#fff', padding: '6px 12px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: '700' },
 };
+
+export { ProductCard };
+export default ProductCard;

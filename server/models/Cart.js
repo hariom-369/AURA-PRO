@@ -1,40 +1,88 @@
 import mongoose from 'mongoose';
 
+const cartItemSchema = new mongoose.Schema(
+  {
+    product: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Product',
+      required: true,
+    },
+    variantSku: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    quantity: {
+      type: Number,
+      required: true,
+      min: 1,
+      default: 1,
+    },
+    // Unit price in paise for backend calculation precision
+    priceInPaise: {
+      type: Number,
+      default: 0,
+    },
+    // Legacy display price field
+    price: {
+      type: Number,
+      default: 0,
+    },
+  },
+  { _id: true }
+);
+
 const cartSchema = new mongoose.Schema(
   {
+    // Sparse index allows guest users (null) without triggering unique constraint errors
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
       unique: true,
+      sparse: true,
+      default: null,
     },
-    items: [
-      {
-        product: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: 'Product',
-          required: true,
-        },
-        quantity: {
-          type: Number,
-          required: true,
-          min: 1,
-          default: 1,
-        },
-        price: {
-          type: Number,
-          required: true,
-        },
-      },
-    ],
+    // Session identifier for unauthenticated guest carts
+    sessionId: {
+      type: String,
+      index: true,
+      default: null,
+    },
+    items: [cartItemSchema],
+    couponCode: {
+      type: String,
+      uppercase: true,
+      trim: true,
+      default: null,
+    },
+    // Total price in paise (integer units)
+    totalPriceInPaise: {
+      type: Number,
+      default: 0,
+    },
+    // Legacy total price field
     totalPrice: {
       type: Number,
-      required: true,
       default: 0,
     },
   },
   { timestamps: true }
 );
 
+// Pre-save hook to synchronize integer paise with display prices
+cartSchema.pre('save', function (next) {
+  if (this.items && this.items.length > 0) {
+    this.items.forEach((item) => {
+      if (item.priceInPaise && !item.price) {
+        item.price = item.priceInPaise / 100;
+      } else if (item.price && !item.priceInPaise) {
+        item.priceInPaise = Math.round(item.price * 100);
+      }
+    });
+  }
+  next();
+});
+
 const Cart = mongoose.model('Cart', cartSchema);
+
 export default Cart;

@@ -1,7 +1,32 @@
+import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-export default function Navbar({ currentView, setCurrentView, cartCount = 0 }) {
+export default function Navbar({ currentView, setCurrentView, cartCount }) {
   const { user, logout } = useAuth();
+  const [localCartCount, setLocalCartCount] = useState(0);
+
+  const syncCartCount = () => {
+    try {
+      const savedCart = JSON.parse(localStorage.getItem('aura_cart') || '[]');
+      const total = savedCart.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+      setLocalCartCount(total);
+    } catch (error) {
+      console.error('Failed to parse cart from storage:', error);
+      setLocalCartCount(0);
+    }
+  };
+
+  useEffect(() => {
+    syncCartCount();
+    window.addEventListener('cartUpdated', syncCartCount);
+    window.addEventListener('storage', syncCartCount);
+    return () => {
+      window.removeEventListener('cartUpdated', syncCartCount);
+      window.removeEventListener('storage', syncCartCount);
+    };
+  }, []);
+
+  const displayCount = (typeof cartCount === 'number' && cartCount > 0) ? cartCount : localCartCount;
 
   return (
     <header style={styles.header}>
@@ -23,7 +48,7 @@ export default function Navbar({ currentView, setCurrentView, cartCount = 0 }) {
           style={currentView === 'cart' ? styles.activeNavLink : styles.navLink}
         >
           Cart
-          {cartCount > 0 && <span style={styles.cartBadge}>{cartCount}</span>}
+          {displayCount > 0 && <span style={styles.cartBadge}>{displayCount}</span>}
         </button>
 
         {user?.role === 'admin' && (

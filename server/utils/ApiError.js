@@ -1,9 +1,11 @@
+// server/utils/ApiError.js
+
 class ApiError extends Error {
   constructor(
     statusCode,
-    message = 'Something went wrong',
+    message = "Something went wrong",
     errors = [],
-    stack = ''
+    stack = ""
   ) {
     super(message);
     this.statusCode = statusCode;
@@ -20,4 +22,5 @@ class ApiError extends Error {
   }
 }
 
+export { ApiError };
 export default ApiError;

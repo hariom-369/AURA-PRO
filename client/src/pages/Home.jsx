@@ -9,19 +9,45 @@ export default function Home({ onCartUpdated }) {
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
 
+  const fetchProducts = async () => {
+    let apiProducts = [];
+
+    // 1. Fetch products from API backend
+    try {
+      const { data } = await API.get('/products');
+      apiProducts = data?.data?.products || data?.data || data?.products || (Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Failed to load products from API, checking local storage:', error);
+    }
+
+    // 2. Read admin-created products from LocalStorage & merge
+    try {
+      const localProducts = JSON.parse(localStorage.getItem('aura_products') || '[]');
+      
+      const combined = [...localProducts];
+      apiProducts.forEach((p) => {
+        const pId = p._id || p.id;
+        if (!combined.some((lp) => (lp._id || lp.id) === pId)) {
+          combined.push(p);
+        }
+      });
+
+      setProducts(combined);
+    } catch (err) {
+      setProducts(apiProducts);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const { data } = await API.get('/products');
-        setProducts(data.data.products);
-        setFilteredProducts(data.data.products);
-      } catch (error) {
-        console.error('Failed to load products:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchProducts();
+    window.addEventListener('productsUpdated', fetchProducts);
+    window.addEventListener('storage', fetchProducts);
+    return () => {
+      window.removeEventListener('productsUpdated', fetchProducts);
+      window.removeEventListener('storage', fetchProducts);
+    };
   }, []);
 
   // Real-time Search and Category Filtering
@@ -31,9 +57,10 @@ export default function Home({ onCartUpdated }) {
       result = result.filter((p) => p.category?.toLowerCase() === activeCategory.toLowerCase());
     }
     if (search.trim() !== '') {
-      result = result.filter((p) =>
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.description.toLowerCase().includes(search.toLowerCase())
+      result = result.filter(
+        (p) =>
+          p.name?.toLowerCase().includes(search.toLowerCase()) ||
+          p.description?.toLowerCase().includes(search.toLowerCase())
       );
     }
     setFilteredProducts(result);
@@ -88,7 +115,11 @@ export default function Home({ onCartUpdated }) {
         ) : (
           <div style={styles.grid}>
             {filteredProducts.map((product) => (
-              <ProductCard key={product._id} product={product} onCartUpdated={onCartUpdated} />
+              <ProductCard 
+                key={product._id || product.id} 
+                product={product} 
+                onCartUpdated={onCartUpdated} 
+              />
             ))}
           </div>
         )}

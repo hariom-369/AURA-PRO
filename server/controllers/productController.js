@@ -1,99 +1,71 @@
 import Product from '../models/Product.js';
-import ApiError from '../utils/ApiError.js';
-import ApiResponse from '../utils/ApiResponse.js';
-import asyncHandler from '../utils/asyncHandler.js';
+import { ApiError } from '../utils/ApiError.js';
+import { ApiResponse } from '../utils/ApiResponse.js';
 
-// @desc    Get all products (with pagination & search)
-// @route   GET /api/v1/products
-export const getProducts = asyncHandler(async (req, res) => {
-  const page = Number(req.query.page) || 1;
-  const limit = Number(req.query.limit) || 10;
-  const keyword = req.query.keyword
-    ? { name: { $regex: req.query.keyword, $options: 'i' } }
-    : {};
+export const getProducts = async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 12);
+    const skip = (page - 1) * limit;
 
-  const count = await Product.countDocuments({ ...keyword });
-  const products = await Product.find({ ...keyword })
-    .limit(limit)
-    .skip(limit * (page - 1));
+    const query = {};
 
-  res.status(200).json(
-    new ApiResponse(
-      200,
-      {
+    if (req.query.search) {
+      query.$text = { $search: req.query.search };
+    }
+
+    if (req.query.category && req.query.category !== 'All') {
+      query.category = { $regex: new RegExp(`^${req.query.category}$`, 'i') };
+    }
+
+    if (req.query.minPrice || req.query.maxPrice) {
+      query.price = {};
+      if (req.query.minPrice) query.price.$gte = Number(req.query.minPrice);
+      if (req.query.maxPrice) query.price.$lte = Number(req.query.maxPrice);
+    }
+
+    if (req.query.minRating) {
+      query.rating = { $gte: Number(req.query.minRating) };
+    }
+
+    let sort = {};
+    switch (req.query.sort) {
+      case 'price-low': sort = { price: 1 }; break;
+      case 'price-high': sort = { price: -1 }; break;
+      case 'newest': sort = { createdAt: -1 }; break;
+      case 'rating': sort = { rating: -1 }; break;
+      default: sort = { createdAt: -1 };
+    }
+
+    const [products, total] = await Promise.all([
+      Product.find(query).sort(sort).skip(skip).limit(limit).lean(),
+      Product.countDocuments(query)
+    ]);
+
+    res.status(200).json(
+      new ApiResponse(200, {
         products,
-        page,
-        pages: Math.ceil(count / limit),
-        total: count,
-      },
-      'Products fetched successfully'
-    )
-  );
-});
-
-// @desc    Get single product by ID
-// @route   GET /api/v1/products/:id
-export const getProductById = asyncHandler(async (req, res) => {
-  const product = await Product.findById(req.params.id);
-  if (!product) {
-    throw new ApiError(404, 'Product not found');
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      }, 'Products fetched successfully')
+    );
+  } catch (error) {
+    next(error);
   }
+};
 
-  res
-    .status(200)
-    .json(new ApiResponse(200, product, 'Product fetched successfully'));
-});
-
-// @desc    Create new product (Admin only)
-// @route   POST /api/v1/products
-export const createProduct = asyncHandler(async (req, res) => {
-  const { name, price, description, category, stock, imageUrl } = req.body;
-
-  const product = await Product.create({
-    user: req.user._id,
-    name,
-    price,
-    description,
-    category,
-    stock,
-    imageUrl,
-  });
-
-  res
-    .status(201)
-    .json(new ApiResponse(201, product, 'Product created successfully'));
-});
-
-// @desc    Update product (Admin only)
-// @route   PUT /api/v1/products/:id
-export const updateProduct = asyncHandler(async (req, res) => {
-  const product = await Product.findById(req.params.id);
-  if (!product) {
-    throw new ApiError(404, 'Product not found');
+export const getProductBySlug = async (req, res, next) => {
+  try {
+    const product = await Product.findOne({ slug: req.params.slug }).lean();
+    if (!product) {
+      throw new ApiError(404, 'Product not found.');
+    }
+    res.status(200).json(new ApiResponse(200, product, 'Product details retrieved'));
+  } catch (error) {
+    next(error);
   }
-
-  const updatedProduct = await Product.findByIdAndUpdate(
-    req.params.id,
-    req.body,
-    { new: true, runValidators: true }
-  );
-
-  res
-    .status(200)
-    .json(new ApiResponse(200, updatedProduct, 'Product updated successfully'));
-});
-
-// @desc    Delete product (Admin only)
-// @route   DELETE /api/v1/products/:id
-export const deleteProduct = asyncHandler(async (req, res) => {
-  const product = await Product.findById(req.params.id);
-  if (!product) {
-    throw new ApiError(404, 'Product not found');
-  }
-
-  await product.deleteOne();
-
-  res
-    .status(200)
-    .json(new ApiResponse(200, null, 'Product deleted successfully'));
-});
+};

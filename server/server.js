@@ -1,5 +1,4 @@
-import dotenv from 'dotenv';
-dotenv.config({ path: './.env' });
+import 'dotenv/config'; // Executes immediately prior to importing app.js
 
 import app from './app.js';
 import connectDB from './config/db.js';

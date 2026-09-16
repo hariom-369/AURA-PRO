@@ -1,5 +1,16 @@
+# Dependencies
 node_modules/
+**/node_modules/
+
+# Environment and Secrets
 .env
+*.env
+!.env.example
+
+# Production Builds
 dist/
 build/
+
+# OS/System Files
 .DS_Store
+Thumbs.db
