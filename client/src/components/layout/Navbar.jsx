@@ -1,76 +1,141 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
+import { useCart } from '../../context/CartContext';
+import { useTheme } from '../../context/ThemeContext';
+import { useSeller } from '../../context/SellerContext';
 
-export const Navbar = ({ user, cartCount = 0, wishlistCount = 0, onLogout }) => {
+export default function Navbar() {
+  const { user, logout } = useAuth();
+  const { itemCount } = useCart();
+  const { theme, toggleTheme } = useTheme();
+  const { status: sellerStatus } = useSeller();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const navigate = useNavigate();
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    if (search.trim()) {
+      navigate(`/?q=${encodeURIComponent(search.trim())}`);
+    }
+  };
+
+  const handleLogout = () => {
+    logout();
+    setIsProfileOpen(false);
+    navigate('/');
+  };
 
   return (
-    <header className="sticky top-0 z-50 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        
-        {/* Brand Logo */}
-        <a href="/" className="flex items-center space-x-2">
-          <span className="bg-indigo-600 text-white font-black text-xs px-2 py-1 rounded">PRO</span>
-          <span className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">AURA</span>
-        </a>
+    <header className="sticky top-0 z-40 border-b border-zinc-200 bg-white/80 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/80">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <Link to="/" className="flex shrink-0 items-center gap-2">
+          <span className="rounded bg-brand-600 px-2 py-1 text-xs font-black text-white">PRO</span>
+          <span className="text-xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50">
+            AURA<span className="text-brand-500">.</span>
+          </span>
+        </Link>
 
-        {/* Global Search Bar */}
-        <div className="hidden md:flex flex-1 max-w-md mx-8">
+        <form onSubmit={handleSearchSubmit} className="hidden max-w-md flex-1 md:flex">
           <input
             type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
             placeholder="Search products, brands, and categories..."
-            className="w-full bg-zinc-100 dark:bg-zinc-900 border border-transparent focus:border-indigo-500 rounded-full px-4 py-2 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none"
+            className="w-full rounded-full border border-transparent bg-zinc-100 px-4 py-2 text-sm text-zinc-900 focus:border-brand-500 focus:outline-none dark:bg-zinc-900 dark:text-zinc-100"
           />
-        </div>
+        </form>
 
-        {/* User Navigation Links */}
-        <div className="flex items-center space-x-6">
-          <a href="/cart" className="relative text-zinc-700 dark:text-zinc-300 hover:text-indigo-600 font-medium text-sm flex items-center">
+        <div className="flex items-center gap-4 sm:gap-6">
+          <button
+            onClick={toggleTheme}
+            aria-label="Toggle theme"
+            className="rounded-full p-2 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-50"
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+
+          {user && (
+            <Link
+              to="/wishlist"
+              className="hidden text-sm font-medium text-zinc-700 hover:text-brand-600 dark:text-zinc-300 dark:hover:text-brand-400 sm:block"
+            >
+              Wishlist
+            </Link>
+          )}
+
+          <Link to="/cart" className="relative flex items-center text-sm font-medium text-zinc-700 hover:text-brand-600 dark:text-zinc-300 dark:hover:text-brand-400">
             Cart
-            {cartCount > 0 && (
-              <span className="ml-1.5 bg-indigo-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                {cartCount}
-              </span>
+            {itemCount > 0 && (
+              <span className="ml-1.5 rounded-full bg-brand-600 px-2 py-0.5 text-xs font-bold text-white">{itemCount}</span>
             )}
-          </a>
+          </Link>
 
           {user ? (
             <div className="relative">
               <button
-                onClick={() => setIsProfileOpen(!isProfileOpen)}
-                className="flex items-center space-x-2 text-sm font-medium text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                onClick={() => setIsProfileOpen((open) => !open)}
+                className="flex items-center gap-2 text-sm font-medium text-zinc-900 focus:outline-none dark:text-zinc-100"
               >
-                <span>{user.name}</span>
+                <span className="hidden sm:inline">{user.name}</span>
+                {user.avatar ? (
+                  <img src={user.avatar} alt={user.name} className="h-8 w-8 rounded-full object-cover" />
+                ) : (
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-sm font-bold text-brand-700 dark:bg-brand-600/20 dark:text-brand-300">
+                    {user.name?.[0]?.toUpperCase() || 'U'}
+                  </span>
+                )}
               </button>
 
               {isProfileOpen && (
-                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg py-1 z-50">
-                  <a href="/account/profile" className="block px-4 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800">My Profile</a>
-                  <a href="/account/orders" className="block px-4 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800">My Orders</a>
-                  <a href="/account/addresses" className="block px-4 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800">Saved Addresses</a>
-                  
-                  {user.role === 'admin' && (
-                    <a href="/admin" className="block px-4 py-2 text-sm text-indigo-600 dark:text-indigo-400 font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800">Admin Studio</a>
-                  )}
-
-                  <button
-                    onClick={onLogout}
-                    className="w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 border-t border-zinc-100 dark:border-zinc-800"
-                  >
-                    Sign Out
-                  </button>
-                </div>
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setIsProfileOpen(false)} />
+                  <div className="absolute right-0 z-20 mt-2 w-52 rounded-xl border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900">
+                    <Link to="/account/profile" onClick={() => setIsProfileOpen(false)} className="block px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                      My Profile
+                    </Link>
+                    <Link to="/orders" onClick={() => setIsProfileOpen(false)} className="block px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                      My Orders
+                    </Link>
+                    <Link to="/wishlist" onClick={() => setIsProfileOpen(false)} className="block px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 sm:hidden">
+                      Wishlist
+                    </Link>
+                    <Link to="/account/addresses" onClick={() => setIsProfileOpen(false)} className="block px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                      Saved Addresses
+                    </Link>
+                    {user.role === 'admin' && (
+                      <Link to="/admin" onClick={() => setIsProfileOpen(false)} className="block px-4 py-2 text-sm font-semibold text-brand-600 hover:bg-zinc-100 dark:text-brand-400 dark:hover:bg-zinc-800">
+                        Admin Studio
+                      </Link>
+                    )}
+                    <Link
+                      to={sellerStatus === 'approved' ? '/seller' : sellerStatus ? '/sell/status' : '/sell'}
+                      onClick={() => setIsProfileOpen(false)}
+                      className="block px-4 py-2 text-sm font-semibold text-brand-600 hover:bg-zinc-100 dark:text-brand-400 dark:hover:bg-zinc-800"
+                    >
+                      {sellerStatus === 'approved' ? 'Seller Dashboard' : sellerStatus ? 'Seller Application' : 'Become a Seller'}
+                    </Link>
+                    <button
+                      onClick={handleLogout}
+                      className="w-full border-t border-zinc-100 px-4 py-2 text-left text-sm text-rose-600 hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-800"
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           ) : (
-            <a
-              href="/login"
-              className="bg-zinc-900 dark:bg-zinc-50 text-zinc-50 dark:text-zinc-900 text-sm font-medium px-4 py-2 rounded-lg"
+            <Link
+              to="/login"
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 dark:bg-zinc-50 dark:text-zinc-900"
             >
               Sign In
-            </a>
+            </Link>
           )}
         </div>
       </div>
     </header>
   );
-};
+}

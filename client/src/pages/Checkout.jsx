@@ -1,146 +1,225 @@
-import React, { useState } from 'react';
-import API from '../api/axios';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useCart } from '../context/CartContext';
+import { getAddresses, createAddress } from '../services/addressService';
+import { previewOrder, createOrder, payForOrder } from '../services/orderService';
+import { formatINR } from '../utils/currency';
 
-export default function Checkout({ cartItems, clearCart, onOrderSuccess }) {
-  const [step, setStep] = useState(1);
-  const [shippingAddress, setShippingAddress] = useState({
-    fullName: '',
-    addressLine1: '',
-    city: '',
-    state: '',
-    postalCode: '',
-    phone: ''
-  });
-  const [deliveryMethod, setDeliveryMethod] = useState('STANDARD');
+const EMPTY_ADDRESS = { fullName: '', street: '', city: '', state: '', postalCode: '', phone: '', isDefault: true };
+
+export default function Checkout() {
+  const { items, subtotal, refreshCart } = useCart();
+  const navigate = useNavigate();
+
+  const [addresses, setAddresses] = useState([]);
+  const [selectedAddressId, setSelectedAddressId] = useState(null);
+  const [newAddress, setNewAddress] = useState(EMPTY_ADDRESS);
+  const [addingAddress, setAddingAddress] = useState(false);
+
+  const [shippingMethod, setShippingMethod] = useState('STANDARD');
   const [couponCode, setCouponCode] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [orderSummary, setOrderSummary] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [placing, setPlacing] = useState(false);
+  const [error, setError] = useState('');
 
-  const calculateBreakdown = async () => {
-    setLoading(true);
+  useEffect(() => {
+    getAddresses()
+      .then((list) => {
+        setAddresses(list);
+        const def = list.find((a) => a.isDefault) || list[0];
+        if (def) setSelectedAddressId(def._id);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (items.length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-dependency-change pattern
+    setPreviewLoading(true);
+    previewOrder({ shippingMethod, couponCode: couponCode || undefined })
+      .then(setPreview)
+      .catch((err) => setError(err.response?.data?.message || 'Could not calculate order total'))
+      .finally(() => setPreviewLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shippingMethod, items.length]);
+
+  if (items.length === 0) {
+    return (
+      <div className="mx-auto max-w-xl px-4 py-20 text-center">
+        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Your cart is empty</h2>
+        <button onClick={() => navigate('/')} className="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-bold text-white">
+          Browse Products
+        </button>
+      </div>
+    );
+  }
+
+  const handleAddAddress = async (e) => {
+    e.preventDefault();
+    setAddingAddress(true);
+    setError('');
     try {
-      const payload = {
-        items: cartItems.map(i => ({ productId: i.product._id || i.product, quantity: i.quantity, variantSku: i.variantSku })),
-        couponCode,
-        shippingMethod
-      };
-      const { data } = await API.post('/checkout/calculate', payload);
-      setOrderSummary(data.data);
-      setStep(4); // Move to Order Summary
+      const address = await createAddress(newAddress);
+      setAddresses((prev) => [address, ...prev]);
+      setSelectedAddressId(address._id);
+      setNewAddress(EMPTY_ADDRESS);
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to calculate total');
+      setError(err.response?.data?.message || 'Could not save address');
     } finally {
-      setLoading(false);
+      setAddingAddress(false);
     }
   };
 
-  const handleCreateOrderAndPay = async () => {
-    setLoading(true);
+  const handleApplyCoupon = () => {
+    setPreviewLoading(true);
+    previewOrder({ shippingMethod, couponCode: couponCode || undefined })
+      .then(setPreview)
+      .catch((err) => setError(err.response?.data?.message || 'Invalid coupon code'))
+      .finally(() => setPreviewLoading(false));
+  };
+
+  const handlePlaceOrder = async () => {
+    const address = addresses.find((a) => a._id === selectedAddressId);
+    if (!address) {
+      setError('Please select or add a shipping address');
+      return;
+    }
+
+    setPlacing(true);
+    setError('');
     try {
-      const payload = {
-        items: cartItems.map(i => ({ productId: i.product._id || i.product, quantity: i.quantity, variantSku: i.variantSku })),
-        shippingAddress,
-        deliveryMethod,
-        couponCode
-      };
+      const order = await createOrder({
+        shippingAddress: {
+          fullName: address.fullName,
+          address: address.street,
+          city: address.city,
+          state: address.state,
+          postalCode: address.postalCode,
+          country: address.country,
+          phone: address.phone,
+        },
+        shippingMethod,
+        couponCode: couponCode || undefined,
+      });
 
-      // 1. Create Order Server-Side
-      const { data } = await API.post('/orders/create', payload);
-      const { order, clientSecret } = data.data;
+      await refreshCart();
 
-      // 2. Mock payment confirmation trigger (or process clientSecret via Stripe Elements)
-      setStep(6);
-      clearCart();
-      if (onOrderSuccess) onOrderSuccess(order);
+      const { url } = await payForOrder(order._id);
+      window.location.href = url;
     } catch (err) {
-      alert(err.response?.data?.message || 'Order creation failed.');
-    } finally {
-      setLoading(false);
+      setError(err.response?.data?.message || 'Checkout failed — please try again');
+      setPlacing(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: '800px', margin: '2rem auto', padding: '1.5rem', color: '#fff' }}>
-      <h2>Checkout (Step {step} of 6)</h2>
-      
-      {step === 1 && (
-        <div>
-          <h3>Step 1: Review Items</h3>
-          {cartItems.map((item, idx) => (
-            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #3f3f46' }}>
-              <span>{item.product.name} (x{item.quantity})</span>
-              <span>₹{((item.product.basePriceInPaise * item.quantity) / 100).toFixed(2)}</span>
-            </div>
-          ))}
-          <button style={styles.primaryBtn} onClick={() => setStep(2)}>Continue to Shipping</button>
-        </div>
-      )}
+    <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
+      <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">Checkout</h1>
 
-      {step === 2 && (
-        <form onSubmit={(e) => { e.preventDefault(); setStep(3); }} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <h3>Step 2: Shipping Address</h3>
-          <input placeholder="Full Name" required value={shippingAddress.fullName} onChange={e => setShippingAddress({...shippingAddress, fullName: e.target.value})} style={styles.input} />
-          <input placeholder="Address Line 1" required value={shippingAddress.addressLine1} onChange={e => setShippingAddress({...shippingAddress, addressLine1: e.target.value})} style={styles.input} />
-          <input placeholder="City" required value={shippingAddress.city} onChange={e => setShippingAddress({...shippingAddress, city: e.target.value})} style={styles.input} />
-          <input placeholder="State" required value={shippingAddress.state} onChange={e => setShippingAddress({...shippingAddress, state: e.target.value})} style={styles.input} />
-          <input placeholder="Postal Code" required value={shippingAddress.postalCode} onChange={e => setShippingAddress({...shippingAddress, postalCode: e.target.value})} style={styles.input} />
-          <input placeholder="Phone Number" required value={shippingAddress.phone} onChange={e => setShippingAddress({...shippingAddress, phone: e.target.value})} style={styles.input} />
-          <button type="submit" style={styles.primaryBtn}>Proceed to Delivery Method</button>
+      {error && <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:bg-rose-950/40 dark:text-rose-400">{error}</div>}
+
+      <div className="mt-6 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+        <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">1. Shipping Address</h2>
+
+        {addresses.length > 0 && (
+          <div className="mt-3 flex flex-col gap-2">
+            {addresses.map((a) => (
+              <label
+                key={a._id}
+                className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm ${
+                  selectedAddressId === a._id ? 'border-brand-500 bg-brand-50 dark:bg-brand-600/10' : 'border-zinc-200 dark:border-zinc-700'
+                }`}
+              >
+                <input type="radio" checked={selectedAddressId === a._id} onChange={() => setSelectedAddressId(a._id)} className="mt-1" />
+                <span className="text-zinc-700 dark:text-zinc-300">
+                  <strong className="text-zinc-900 dark:text-zinc-50">{a.fullName}</strong> — {a.street}, {a.city}, {a.state} {a.postalCode} · {a.phone}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <form onSubmit={handleAddAddress} className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <input required placeholder="Full name" value={newAddress.fullName} onChange={(e) => setNewAddress({ ...newAddress, fullName: e.target.value })} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950" />
+          <input required placeholder="Phone" value={newAddress.phone} onChange={(e) => setNewAddress({ ...newAddress, phone: e.target.value })} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950" />
+          <input required placeholder="Street address" value={newAddress.street} onChange={(e) => setNewAddress({ ...newAddress, street: e.target.value })} className="col-span-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950" />
+          <input required placeholder="City" value={newAddress.city} onChange={(e) => setNewAddress({ ...newAddress, city: e.target.value })} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950" />
+          <input required placeholder="State" value={newAddress.state} onChange={(e) => setNewAddress({ ...newAddress, state: e.target.value })} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950" />
+          <input required placeholder="Postal code" value={newAddress.postalCode} onChange={(e) => setNewAddress({ ...newAddress, postalCode: e.target.value })} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950" />
+          <button type="submit" disabled={addingAddress} className="rounded-lg border border-zinc-300 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800">
+            {addingAddress ? 'Saving...' : '+ Save New Address'}
+          </button>
         </form>
-      )}
+      </div>
 
-      {step === 3 && (
-        <div>
-          <h3>Step 3: Delivery Options</h3>
-          <label style={{ display: 'block', margin: '10px 0' }}>
-            <input type="radio" name="delivery" value="STANDARD" checked={deliveryMethod === 'STANDARD'} onChange={() => setDeliveryMethod('STANDARD')} /> Standard Shipping (₹99 or FREE over ₹1999)
+      <div className="mt-6 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+        <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">2. Delivery Method</h2>
+        <div className="mt-3 flex flex-col gap-2 text-sm">
+          <label className="flex items-center gap-2">
+            <input type="radio" checked={shippingMethod === 'STANDARD'} onChange={() => setShippingMethod('STANDARD')} />
+            Standard — ₹99 (free over ₹1999)
           </label>
-          <label style={{ display: 'block', margin: '10px 0' }}>
-            <input type="radio" name="delivery" value="EXPRESS" checked={deliveryMethod === 'EXPRESS'} onChange={() => setDeliveryMethod('EXPRESS')} /> Express Delivery (₹250)
+          <label className="flex items-center gap-2">
+            <input type="radio" checked={shippingMethod === 'EXPRESS'} onChange={() => setShippingMethod('EXPRESS')} />
+            Express — ₹250
           </label>
-          <div style={{ marginTop: '15px' }}>
-            <input placeholder="Promo Coupon Code" value={couponCode} onChange={e => setCouponCode(e.target.value)} style={styles.input} />
-          </div>
-          <button style={styles.primaryBtn} onClick={calculateBreakdown} disabled={loading}>{loading ? 'Calculating...' : 'Calculate Total Summary'}</button>
         </div>
-      )}
 
-      {step === 4 && orderSummary && (
-        <div>
-          <h3>Step 4: Verified Order Summary</h3>
-          <div style={{ backgroundColor: '#18181b', padding: '15px', borderRadius: '8px', margin: '15px 0' }}>
-            <p>Subtotal: ₹{(orderSummary.pricing.subtotalInPaise / 100).toFixed(2)}</p>
-            <p>Discount: -₹{(orderSummary.pricing.discountInPaise / 100).toFixed(2)}</p>
-            <p>Shipping: ₹{(orderSummary.pricing.shippingInPaise / 100).toFixed(2)}</p>
-            <p>GST (18%): ₹{(orderSummary.pricing.taxInPaise / 100).toFixed(2)}</p>
-            <hr />
-            <h4>Final Total: ₹{(orderSummary.pricing.grandTotalInPaise / 100).toFixed(2)}</h4>
-          </div>
-          <button style={styles.primaryBtn} onClick={() => setStep(5)}>Proceed to Payment</button>
-        </div>
-      )}
-
-      {step === 5 && (
-        <div>
-          <h3>Step 5: Secure Payment</h3>
-          <p>Payment Processing via Stripe (Server Verified)</p>
-          <button style={styles.primaryBtn} onClick={handleCreateOrderAndPay} disabled={loading}>
-            {loading ? 'Processing Order...' : 'Pay & Confirm Order'}
+        <div className="mt-4 flex gap-2">
+          <input
+            placeholder="Coupon code"
+            value={couponCode}
+            onChange={(e) => setCouponCode(e.target.value)}
+            className="flex-1 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm uppercase dark:border-zinc-700 dark:bg-zinc-950"
+          />
+          <button onClick={handleApplyCoupon} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold dark:border-zinc-700">
+            Apply
           </button>
         </div>
-      )}
+      </div>
 
-      {step === 6 && (
-        <div style={{ textAlign: 'center', padding: '2rem' }}>
-          <h2 style={{ color: '#10b981' }}>✓ Order Placed Successfully!</h2>
-          <p>Your order is being processed. Payment status will update automatically upon verification.</p>
-        </div>
-      )}
+      <div className="mt-6 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+        <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">3. Order Summary</h2>
+        {previewLoading ? (
+          <p className="mt-3 text-sm text-zinc-400">Calculating...</p>
+        ) : preview ? (
+          <div className="mt-3 space-y-1.5 text-sm">
+            <div className="flex justify-between text-zinc-600 dark:text-zinc-300">
+              <span>Subtotal</span>
+              <span>{formatINR(preview.pricing.subtotalInPaise / 100)}</span>
+            </div>
+            {preview.pricing.discountInPaise > 0 && (
+              <div className="flex justify-between text-emerald-600">
+                <span>Discount</span>
+                <span>−{formatINR(preview.pricing.discountInPaise / 100)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-zinc-600 dark:text-zinc-300">
+              <span>Shipping</span>
+              <span>{formatINR(preview.pricing.shippingInPaise / 100)}</span>
+            </div>
+            <div className="flex justify-between text-zinc-600 dark:text-zinc-300">
+              <span>GST (18%)</span>
+              <span>{formatINR(preview.pricing.taxInPaise / 100)}</span>
+            </div>
+            <div className="mt-2 flex justify-between border-t border-zinc-100 pt-2 text-base font-bold text-zinc-900 dark:border-zinc-800 dark:text-zinc-50">
+              <span>Total</span>
+              <span>{formatINR(preview.pricing.grandTotalInPaise / 100)}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-zinc-400">Subtotal: {formatINR(subtotal)}</p>
+        )}
+
+        <button
+          onClick={handlePlaceOrder}
+          disabled={placing || !selectedAddressId}
+          className="mt-5 w-full rounded-lg bg-brand-600 py-3 text-sm font-bold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {placing ? 'Redirecting to secure payment...' : 'Place Order & Pay'}
+        </button>
+      </div>
     </div>
   );
 }
-
-const styles = {
-  input: { width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #3f3f46', backgroundColor: '#18181b', color: '#fff' },
-  primaryBtn: { padding: '12px 20px', backgroundColor: '#6366f1', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', marginTop: '15px', width: '100%' }
-};

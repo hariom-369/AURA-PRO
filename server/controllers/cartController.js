@@ -12,7 +12,7 @@ const calculateTotal = (items) =>
 export const getCart = asyncHandler(async (req, res) => {
   let cart = await Cart.findOne({ user: req.user._id }).populate(
     'items.product',
-    'name imageUrl stock'
+    'name slug primaryImage stock'
   );
 
   if (!cart) {
@@ -22,18 +22,16 @@ export const getCart = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, cart, 'Cart retrieved successfully'));
 });
 
-// @desc    Add item or update quantity in cart
+// @desc    Add an item, or adjust an existing item's quantity by a signed delta
+//          (a delta that brings quantity to 0 or below removes the item)
 // @route   POST /api/v1/cart
 export const addToCart = asyncHandler(async (req, res) => {
   const { productId, quantity = 1 } = req.body;
+  const delta = Number(quantity);
 
   const product = await Product.findById(productId);
   if (!product) {
     throw new ApiError(404, 'Product not found');
-  }
-
-  if (product.stock < quantity) {
-    throw new ApiError(400, 'Requested quantity exceeds available stock');
   }
 
   let cart = await Cart.findOne({ user: req.user._id });
@@ -46,11 +44,25 @@ export const addToCart = asyncHandler(async (req, res) => {
   );
 
   if (existingItemIndex > -1) {
-    cart.items[existingItemIndex].quantity += Number(quantity);
+    const newQuantity = cart.items[existingItemIndex].quantity + delta;
+    if (newQuantity <= 0) {
+      cart.items.splice(existingItemIndex, 1);
+    } else {
+      if (newQuantity > product.stock) {
+        throw new ApiError(400, 'Requested quantity exceeds available stock');
+      }
+      cart.items[existingItemIndex].quantity = newQuantity;
+    }
   } else {
+    if (delta <= 0) {
+      throw new ApiError(400, 'Invalid quantity');
+    }
+    if (delta > product.stock) {
+      throw new ApiError(400, 'Requested quantity exceeds available stock');
+    }
     cart.items.push({
       product: productId,
-      quantity: Number(quantity),
+      quantity: delta,
       price: product.price,
     });
   }
@@ -58,7 +70,7 @@ export const addToCart = asyncHandler(async (req, res) => {
   cart.totalPrice = calculateTotal(cart.items);
   await cart.save();
 
-  res.status(200).json(new ApiResponse(200, cart, 'Item added to cart successfully'));
+  res.status(200).json(new ApiResponse(200, cart, 'Cart updated successfully'));
 });
 
 // @desc    Remove item from cart

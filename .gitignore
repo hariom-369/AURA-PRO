@@ -14,3 +14,8 @@ build/
 # OS/System Files
 .DS_Store
 Thumbs.db
+
+# Claude Code local session state (permission grants, scheduled-task locks) —
+# contains real command history that can include tokens/secrets from local
+# testing; never shared/committed.
+.claude/

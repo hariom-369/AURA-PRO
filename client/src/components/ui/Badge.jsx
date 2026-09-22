@@ -1,5 +1,3 @@
-import React from 'react';
-
 export const Badge = ({ children, variant = 'neutral', className = '' }) => {
   const variants = {
     neutral: 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200',

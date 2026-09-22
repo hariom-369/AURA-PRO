@@ -1,168 +1,257 @@
-import { useEffect, useState } from 'react';
-import API from '../api/axios';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import ProductCard from '../components/ProductCard';
+import { ProductCardSkeleton } from '../components/ui/Skeleton';
+import { EmptyState } from '../components/ui/EmptyState';
+import { getProducts } from '../services/productService';
+import { semanticSearch, getRecommendations } from '../services/aiService';
+import { getRecentlyViewed } from '../utils/recentlyViewed';
+import { useCart } from '../context/CartContext';
 
-export default function Home({ onCartUpdated }) {
+const SORT_OPTIONS = [
+  { value: '', label: 'Newest' },
+  { value: 'price-low', label: 'Price: Low to High' },
+  { value: 'price-high', label: 'Price: High to Low' },
+  { value: 'rating', label: 'Top Rated' },
+];
+
+export default function Home() {
+  const [searchParams] = useSearchParams();
   const [products, setProducts] = useState([]);
-  const [filteredProducts, setFilteredProducts] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, pages: 1 });
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('q') || '');
   const [activeCategory, setActiveCategory] = useState('All');
+  const [sort, setSort] = useState('');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [categories, setCategories] = useState(['All']);
 
-  const fetchProducts = async () => {
-    let apiProducts = [];
+  const [aiResults, setAiResults] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState(null);
 
-    // 1. Fetch products from API backend
+  const [recommended, setRecommended] = useState([]);
+  const recentlyViewed = useMemo(() => getRecentlyViewed(), []);
+  const { items: cartItems } = useCart();
+
+  const fetchProducts = async (page = 1) => {
+    setLoading(true);
     try {
-      const { data } = await API.get('/products');
-      apiProducts = data?.data?.products || data?.data || data?.products || (Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error('Failed to load products from API, checking local storage:', error);
-    }
-
-    // 2. Read admin-created products from LocalStorage & merge
-    try {
-      const localProducts = JSON.parse(localStorage.getItem('aura_products') || '[]');
-      
-      const combined = [...localProducts];
-      apiProducts.forEach((p) => {
-        const pId = p._id || p.id;
-        if (!combined.some((lp) => (lp._id || lp.id) === pId)) {
-          combined.push(p);
-        }
+      const data = await getProducts({
+        page,
+        limit: 24,
+        search: search || undefined,
+        category: activeCategory !== 'All' ? activeCategory : undefined,
+        sort: sort || undefined,
+        minPrice: minPrice || undefined,
+        maxPrice: maxPrice || undefined,
       });
-
-      setProducts(combined);
-    } catch (err) {
-      setProducts(apiProducts);
+      setProducts(data.products || []);
+      setPagination(data.pagination || { page: 1, pages: 1 });
+      if (categories.length === 1) {
+        const uniqueCategories = ['All', ...new Set((data.products || []).map((p) => p.category).filter(Boolean))];
+        setCategories(uniqueCategories);
+      }
+    } catch {
+      setProducts([]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchProducts();
-    window.addEventListener('productsUpdated', fetchProducts);
-    window.addEventListener('storage', fetchProducts);
-    return () => {
-      window.removeEventListener('productsUpdated', fetchProducts);
-      window.removeEventListener('storage', fetchProducts);
-    };
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-dependency-change pattern
+    fetchProducts(1);
+    setAiResults(null);
+    setAiError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCategory, sort, minPrice, maxPrice]);
+
+  useEffect(() => {
+    getRecommendations({
+      recentlyViewedIds: recentlyViewed.map((p) => p._id),
+      cartProductIds: cartItems.map((i) => i.product?._id).filter(Boolean),
+      limit: 8,
+    })
+      .then((res) => setRecommended(res.products || []))
+      .catch(() => setRecommended([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Real-time Search and Category Filtering
-  useEffect(() => {
-    let result = products;
-    if (activeCategory !== 'All') {
-      result = result.filter((p) => p.category?.toLowerCase() === activeCategory.toLowerCase());
+  const handleAskAI = async () => {
+    if (!search.trim() || aiLoading) return;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const result = await semanticSearch(search.trim());
+      setAiResults(result.products || []);
+    } catch (err) {
+      setAiResults(null);
+      setAiError(err.response?.data?.message || 'AI search is unavailable right now — showing regular results.');
+    } finally {
+      setAiLoading(false);
     }
-    if (search.trim() !== '') {
-      result = result.filter(
-        (p) =>
-          p.name?.toLowerCase().includes(search.toLowerCase()) ||
-          p.description?.toLowerCase().includes(search.toLowerCase())
-      );
-    }
-    setFilteredProducts(result);
-  }, [search, activeCategory, products]);
+  };
 
-  const categories = ['All', ...new Set(products.map((p) => p.category).filter(Boolean))];
+  const handleSearchKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      fetchProducts(1);
+    }
+  };
+
+  const displayedProducts = aiResults !== null ? aiResults : products;
 
   return (
-    <main style={{ paddingBottom: '4rem' }}>
-      {/* Hero Section */}
-      <section style={styles.hero}>
-        <div style={styles.heroContent}>
-          <span style={styles.heroTag}>SEASON RELEASE 2026</span>
-          <h2 style={styles.heroTitle}>NEXT-GEN HARDWARE & DESIGN</h2>
-          <p style={styles.heroSub}>
-            Discover hand-crafted tech, high-end acoustics, and limited-edition wearables.
-          </p>
-        </div>
+    <main className="pb-16">
+      <section className="bg-gradient-to-b from-brand-500/10 to-transparent px-4 py-16 text-center sm:px-6">
+        <span className="text-xs font-extrabold tracking-widest text-brand-500">SEASON RELEASE 2026</span>
+        <h1 className="mx-auto mt-3 max-w-2xl text-4xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-5xl">
+          Next-gen hardware &amp; design
+        </h1>
+        <p className="mx-auto mt-4 max-w-xl text-zinc-500 dark:text-zinc-400">
+          Discover hand-crafted tech, high-end acoustics, and limited-edition wearables — with an AI assistant to help you choose.
+        </p>
       </section>
 
-      {/* Interactive Controls Bar */}
-      <section style={styles.controlBar}>
-        <div style={styles.searchWrapper}>
-          <input
-            type="text"
-            placeholder="Search products..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={styles.searchInput}
-          />
-        </div>
-
-        <div style={styles.pillsContainer}>
-          {categories.map((cat) => (
+      <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-xl">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder='Try "comfortable shoes for daily use under ₹2000"'
+              className="flex-1 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm text-zinc-900 focus:border-brand-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+            />
             <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              style={activeCategory === cat ? styles.activePill : styles.pill}
+              onClick={handleAskAI}
+              disabled={aiLoading || !search.trim()}
+              className="whitespace-nowrap rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
             >
-              {cat}
+              {aiLoading ? '...' : '✨ Ask AI'}
             </button>
-          ))}
+          </div>
+          {aiError && <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">{aiError}</p>}
+          {aiResults !== null && !aiError && (
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+              Showing AI-interpreted results for "{search}".{' '}
+              <button onClick={() => setAiResults(null)} className="font-semibold text-brand-600 underline dark:text-brand-400">
+                Clear
+              </button>
+            </p>
+          )}
         </div>
-      </section>
 
-      {/* Catalog Grid */}
-      <section style={styles.gridSection}>
-        {loading ? (
-          <div style={styles.loader}>Loading storefront catalog...</div>
-        ) : filteredProducts.length === 0 ? (
-          <div style={styles.emptyState}>No products match your criteria.</div>
-        ) : (
-          <div style={styles.grid}>
-            {filteredProducts.map((product) => (
-              <ProductCard 
-                key={product._id || product.id} 
-                product={product} 
-                onCartUpdated={onCartUpdated} 
-              />
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+          <div className="flex flex-wrap justify-center gap-2">
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setActiveCategory(cat)}
+                className={`rounded-full border px-4 py-1.5 text-sm font-semibold transition-colors ${
+                  activeCategory === cat
+                    ? 'border-brand-600 bg-brand-600 text-white'
+                    : 'border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300'
+                }`}
+              >
+                {cat}
+              </button>
             ))}
           </div>
-        )}
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+          <input
+            type="number"
+            placeholder="Min ₹"
+            value={minPrice}
+            onChange={(e) => setMinPrice(e.target.value)}
+            className="w-28 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 focus:border-brand-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+          />
+          <input
+            type="number"
+            placeholder="Max ₹"
+            value={maxPrice}
+            onChange={(e) => setMaxPrice(e.target.value)}
+            className="w-28 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 focus:border-brand-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+          />
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value)}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 focus:border-brand-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+          >
+            {SORT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mt-8">
+          {loading ? (
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <ProductCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : displayedProducts.length === 0 ? (
+            <EmptyState title="No products match your criteria" description="Try adjusting your filters or search terms." />
+          ) : (
+            <>
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {displayedProducts.map((product) => (
+                  <ProductCard key={product._id} product={product} />
+                ))}
+              </div>
+              {aiResults === null && pagination.pages > 1 && (
+                <div className="mt-8 flex justify-center gap-2">
+                  {Array.from({ length: pagination.pages }).map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => fetchProducts(i + 1)}
+                      className={`h-9 w-9 rounded-lg text-sm font-semibold ${
+                        pagination.page === i + 1
+                          ? 'bg-brand-600 text-white'
+                          : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300'
+                      }`}
+                    >
+                      {i + 1}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </section>
+
+      {recommended.length > 0 && (
+        <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+          <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-50">Recommended for You</h2>
+          <div className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {recommended.map((product) => (
+              <ProductCard key={product._id} product={product} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {recentlyViewed.length > 0 && (
+        <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+          <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-50">Recently Viewed</h2>
+          <div className="mt-4 flex gap-4 overflow-x-auto pb-2">
+            {recentlyViewed.map((product) => (
+              <div key={product._id} className="w-48 shrink-0">
+                <ProductCard product={product} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </main>
   );
 }
-
-const styles = {
-  hero: {
-    padding: '4rem 3rem 2rem 3rem',
-    textAlign: 'center',
-    background: 'radial-gradient(circle at top, rgba(99, 102, 241, 0.15) 0%, rgba(9, 9, 11, 0) 70%)',
-  },
-  heroContent: { maxWidth: '700px', margin: '0 auto' },
-  heroTag: { fontSize: '0.75rem', fontWeight: '800', letterSpacing: '2px', color: '#818cf8' },
-  heroTitle: { fontSize: '2.8rem', fontWeight: '800', letterSpacing: '-1px', margin: '12px 0', color: '#fff' },
-  heroSub: { fontSize: '1rem', color: '#a1a1aa', lineHeight: '1.6' },
-  controlBar: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '1.5rem',
-    padding: '2rem 3rem 1rem 3rem',
-    maxWidth: '1200px',
-    margin: '0 auto',
-  },
-  searchWrapper: { width: '100%', maxWidth: '450px' },
-  searchInput: {
-    width: '100%',
-    padding: '12px 20px',
-    backgroundColor: '#18181b',
-    border: '1px solid #27272a',
-    borderRadius: '12px',
-    color: '#fff',
-    fontSize: '0.95rem',
-    outline: 'none',
-  },
-  pillsContainer: { display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' },
-  pill: { padding: '6px 16px', backgroundColor: '#18181b', border: '1px solid #27272a', color: '#a1a1aa', borderRadius: '99px', fontSize: '0.85rem', cursor: 'pointer' },
-  activePill: { padding: '6px 16px', backgroundColor: '#6366f1', border: '1px solid #6366f1', color: '#fff', borderRadius: '99px', fontSize: '0.85rem', fontWeight: '700', cursor: 'pointer' },
-  gridSection: { maxWidth: '1200px', margin: '2rem auto', padding: '0 3rem' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '24px' },
-  loader: { textAlign: 'center', padding: '4rem', color: '#71717a' },
-  emptyState: { textAlign: 'center', padding: '4rem', color: '#71717a', backgroundColor: '#18181b', borderRadius: '16px', border: '1px dashed #27272a' },
-};

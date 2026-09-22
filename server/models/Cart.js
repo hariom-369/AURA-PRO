@@ -70,7 +70,7 @@ const cartSchema = new mongoose.Schema(
 );
 
 // Pre-save hook to synchronize integer paise with display prices
-cartSchema.pre('save', function (next) {
+cartSchema.pre('save', function () {
   if (this.items && this.items.length > 0) {
     this.items.forEach((item) => {
       if (item.priceInPaise && !item.price) {
@@ -80,7 +80,6 @@ cartSchema.pre('save', function (next) {
       }
     });
   }
-  next();
 });
 
 const Cart = mongoose.model('Cart', cartSchema);

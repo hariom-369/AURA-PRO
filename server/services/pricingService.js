@@ -1,5 +1,5 @@
-const Product = require('../models/Product');
-const Coupon = require('../models/Coupon');
+import Product from '../models/Product.js';
+import Coupon from '../models/Coupon.js';
 
 /**
  * Recalculates cart monetary figures entirely on backend.
@@ -38,7 +38,9 @@ async function calculateOrderTotal(items, couponCode = null, shippingMethod = 'S
       unitPriceInPaise,
       quantity: item.quantity,
       totalInPaise: itemTotalInPaise,
-      taxRatePercent: product.taxRatePercent
+      taxRatePercent: product.taxRatePercent,
+      // null = platform-owned, matching Product.seller's own null meaning.
+      seller: product.seller || null,
     });
   }
 
@@ -89,4 +91,4 @@ async function calculateOrderTotal(items, couponCode = null, shippingMethod = 'S
   };
 }
 
-module.exports = { calculateOrderTotal };
+export { calculateOrderTotal };

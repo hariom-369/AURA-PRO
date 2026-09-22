@@ -17,6 +17,9 @@ const variantSchema = new mongoose.Schema({
 
 const productSchema = new mongoose.Schema(
   {
+    // null = platform-owned (today's behavior, unchanged). Set only for
+    // products created by an approved Seller through the seller dashboard.
+    seller: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller', default: null, index: true },
     name: { type: String, required: true, trim: true },
     slug: { type: String, required: true, unique: true, lowercase: true, index: true },
     brand: { type: String, required: true, default: 'AURA' },
@@ -60,20 +63,39 @@ const productSchema = new mongoose.Schema(
     specifications: [specificationSchema],
     tags: [{ type: String }],
     seoTitle: { type: String },
-    seoDescription: { type: String }
+    seoDescription: { type: String },
+
+    // AI-generated drafts — never published automatically, require explicit
+    // admin approval (see descriptionGeneratorService) before overwriting the
+    // live description/seoTitle/seoDescription fields above.
+    draftDescription: { type: String, default: null },
+    draftSeoTitle: { type: String, default: null },
+    draftSeoDescription: { type: String, default: null },
+    draftTags: [{ type: String }],
+    draftCategory: { type: String, default: null },
   },
   { timestamps: true }
 );
 
-// Pre-save middleware to synchronize integer paise values with legacy decimal display fields
-productSchema.pre('save', function (next) {
-  if (this.basePriceInPaise !== undefined) {
+// Runs pre-validate (not pre-save) because basePriceInPaise is a required field
+// that must be derived from the legacy `price` input before validation runs.
+//
+// Whichever side of a decimal/paise pair was actually edited this operation
+// wins the sync direction — otherwise, once both fields exist, editing the
+// legacy decimal field on an update would silently have no effect (the paise
+// field would keep overwriting it back on every save).
+productSchema.pre('validate', function () {
+  if (this.isModified('price')) {
+    this.basePriceInPaise = Math.round((this.price || 0) * 100);
+  } else if (this.basePriceInPaise !== undefined) {
     this.price = this.basePriceInPaise / 100;
   } else if (this.price !== undefined) {
     this.basePriceInPaise = Math.round(this.price * 100);
   }
 
-  if (this.compareAtPriceInPaise !== undefined && this.compareAtPriceInPaise > 0) {
+  if (this.isModified('originalPrice')) {
+    this.compareAtPriceInPaise = Math.round((this.originalPrice || 0) * 100);
+  } else if (this.compareAtPriceInPaise !== undefined && this.compareAtPriceInPaise > 0) {
     this.originalPrice = this.compareAtPriceInPaise / 100;
   } else if (this.originalPrice !== undefined && this.originalPrice > 0) {
     this.compareAtPriceInPaise = Math.round(this.originalPrice * 100);
@@ -90,10 +112,9 @@ productSchema.pre('save', function (next) {
   if (!this.primaryImage && this.images && this.images.length > 0) {
     this.primaryImage = this.images[0];
   }
-
-  next();
 });
 
 productSchema.index({ name: 'text', description: 'text', brand: 'text' });
+productSchema.index({ category: 1, isActive: 1 });
 
 export default mongoose.model('Product', productSchema);

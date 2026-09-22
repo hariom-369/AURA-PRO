@@ -14,10 +14,18 @@ export const protect = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.type === 'otp_pending') {
+      // Defense in depth: a pending OTP session token must never grant real
+      // access, even though it already lacks the `id` claim this code reads.
+      throw new ApiError(401, 'This token is not valid for authentication.');
+    }
     const user = await User.findById(decoded.id).select('-password');
 
     if (!user) {
       throw new ApiError(401, 'User associated with this token no longer exists.');
+    }
+    if (!user.isActive) {
+      throw new ApiError(403, 'This account has been deactivated.');
     }
 
     req.user = user;
@@ -25,6 +33,25 @@ export const protect = async (req, res, next) => {
   } catch (error) {
     next(error instanceof ApiError ? error : new ApiError(401, 'Invalid or expired authentication token.'));
   }
+};
+
+// Attaches req.user if a valid token is present, but never rejects the request
+// if it's missing or invalid — for endpoints usable by both guests and users.
+export const optionalAuth = async (req, res, next) => {
+  try {
+    let token;
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
+    }
+    if (!token) return next();
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id).select('-password');
+    if (user && user.isActive) req.user = user;
+  } catch (error) {
+    // Invalid/expired token on an optional-auth route: proceed as a guest.
+  }
+  next();
 };
 
 export const adminOnly = (req, res, next) => {

@@ -1,4 +1,7 @@
-const Product = require('../models/Product');
+import Product from '../models/Product.js';
+import User from '../models/User.js';
+import { sendLowStockAlertEmail } from './emailService.js';
+import logger from '../utils/logger.js';
 
 /**
  * Atomic stock updates to prevent overselling.
@@ -45,4 +48,27 @@ async function restoreStock(items) {
   }
 }
 
-module.exports = { reserveAndDeductStock, restoreStock };
+// Checks products for low stock after a deduction and emails admins. Never
+// throws — a failed alert must not affect the order that triggered it.
+async function checkAndAlertLowStock(productIds) {
+  try {
+    const products = await Product.find({
+      _id: { $in: productIds },
+      $expr: { $lte: ['$stock', '$lowStockThreshold'] },
+    }).lean();
+
+    if (products.length === 0) return;
+
+    const admins = await User.find({ role: 'admin' }).select('email').lean();
+    for (const product of products) {
+      logger.warn('low_stock_alert', { product: product.name, stock: product.stock, threshold: product.lowStockThreshold });
+      for (const admin of admins) {
+        await sendLowStockAlertEmail(admin.email, product);
+      }
+    }
+  } catch (error) {
+    logger.error('low_stock_alert_failed', { error: error.message });
+  }
+}
+
+export { reserveAndDeductStock, restoreStock, checkAndAlertLowStock };

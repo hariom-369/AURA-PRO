@@ -28,6 +28,7 @@ const seedAdmin = async () => {
     if (existingUser) {
       existingUser.role = 'admin';
       existingUser.password = adminPassword; // Triggers password hash middleware if present in schema
+      existingUser.isEmailVerified = true;
       await existingUser.save();
       console.log(`✓ Upgraded existing user (${adminEmail}) to ADMIN role.`);
     } else {

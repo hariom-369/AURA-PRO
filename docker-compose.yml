@@ -1,0 +1,29 @@
+# Local/self-hosted full-stack run against production-style builds (both
+# services built from their Dockerfiles). Uses your existing MongoDB Atlas
+# cluster via server/.env — no local MongoDB container, matching how this
+# project already runs. For real deployment, client and server are typically
+# hosted separately (e.g. a static host + a container host) — see
+# docs/DEPLOYMENT.md.
+services:
+  server:
+    build:
+      context: ./server
+    env_file:
+      - ./server/.env
+    ports:
+      - '5000:5000'
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ./client
+      args:
+        # Browser-facing URL of the server above. When running compose purely
+        # locally this is localhost:5000; override (`VITE_API_URL=... docker
+        # compose build`) if the server is reachable at a different address.
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:5000/api/v1}
+    ports:
+      - '8080:80'
+    depends_on:
+      - server
+    restart: unless-stopped

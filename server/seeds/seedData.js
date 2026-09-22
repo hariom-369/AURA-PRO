@@ -128,19 +128,25 @@ const seedDatabase = async () => {
         name: 'AURA Administrator',
         email: 'admin@aurapro.com',
         password: 'AdminPassword123!',
-        role: 'admin'
+        role: 'admin',
+        isEmailVerified: true
       },
       {
         name: 'Demo Customer',
         email: 'customer@aurapro.com',
         password: 'CustomerPassword123!',
-        role: 'customer'
+        role: 'customer',
+        isEmailVerified: true
       }
     ]);
 
     console.log('Created Admin and Customer accounts.');
 
-    await Product.insertMany(products);
+    // Use create() (not insertMany) so the pre-save hook derives basePriceInPaise,
+    // discountPercentage, and primaryImage from the legacy display fields above.
+    for (const product of products) {
+      await Product.create(product);
+    }
     console.log('Successfully seeded clean AURA PRO products.');
 
     process.exit(0);

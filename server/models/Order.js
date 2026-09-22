@@ -13,6 +13,21 @@ const orderItemSchema = new mongoose.Schema(
       ref: 'Product',
       required: true,
     },
+    // Denormalized from the product at order-creation time (not a live
+    // lookup) so it survives a later reassignment/deletion of the product,
+    // and so "which seller does this line item belong to" never has to
+    // re-derive itself from mutable product state. null = platform-owned,
+    // matching Product.seller's null meaning.
+    seller: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller', default: null, index: true },
+    // Per-item fulfillment, independent of the order-wide `status` below —
+    // a multi-seller order lets each seller progress their own line items
+    // without needing to split into separate Order documents or touch
+    // Stripe/payment state, which stays order-wide.
+    fulfillmentStatus: {
+      type: String,
+      enum: ['PENDING', 'PROCESSING', 'PACKED', 'SHIPPED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'],
+      default: 'PENDING',
+    },
   },
   { _id: true }
 );
@@ -80,11 +95,15 @@ const orderSchema = new mongoose.Schema(
       index: true,
       default: null,
     },
+    // No `default: null` here deliberately — a sparse unique index only
+    // excludes documents where the field is truly absent, not ones where
+    // it's explicitly set to null. Mongoose applies defaults eagerly, so a
+    // `default: null` would write a literal null into every order, and the
+    // second order ever created would collide with the first on that value.
     idempotencyKey: {
       type: String,
       unique: true,
       sparse: true,
-      default: null,
     },
 
     // Integer Paise Prices
@@ -134,15 +153,15 @@ const orderSchema = new mongoose.Schema(
 );
 
 // Generate unique order number prior to schema validation
-orderSchema.pre('validate', function (next) {
+orderSchema.pre('validate', function () {
   if (!this.orderNumber) {
     this.orderNumber = `AURA-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
   }
-  next();
 });
 
-// Synchronize integer paise values, legacy decimal prices, and status timeline
-orderSchema.pre('save', function (next) {
+// Runs pre-validate (not pre-save) because orderItems.price is a required field
+// that must be derived from priceInPaise before validation runs.
+orderSchema.pre('validate', function () {
   if (this.totalPriceInPaise && !this.totalPrice) {
     this.totalPrice = this.totalPriceInPaise / 100;
   } else if (this.totalPrice && !this.totalPriceInPaise) {
@@ -190,9 +209,9 @@ orderSchema.pre('save', function (next) {
   if (this.isNew && (!this.timeline || this.timeline.length === 0)) {
     this.timeline = [{ status: this.status, timestamp: new Date(), note: 'Order created.' }];
   }
-
-  next();
 });
+
+orderSchema.index({ user: 1, createdAt: -1 });
 
 const Order = mongoose.model('Order', orderSchema);
 export default Order;

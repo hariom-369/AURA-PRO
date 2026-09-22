@@ -35,11 +35,18 @@ export const helmetMiddleware = helmet({
   crossOriginEmbedderPolicy: false
 });
 
+// Real IP-based rate limiting isn't meaningful in automated tests — every
+// request comes from the same test-runner "IP", so a normal budget gets
+// exhausted almost immediately by tests that legitimately call an endpoint
+// many times, unrelated to whatever they're actually asserting.
+const skipInTests = () => process.env.NODE_ENV === 'test';
+
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInTests,
   message: { success: false, message: 'Too many requests from this IP. Please try again after 15 minutes.' }
 });
 
@@ -48,6 +55,7 @@ export const authLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInTests,
   message: { success: false, message: 'Excessive authentication attempts. Account locked temporarily for security.' }
 });
 
@@ -56,7 +64,17 @@ export const checkoutLimiter = rateLimit({
   max: 15,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInTests,
   message: { success: false, message: 'Too many checkout attempts. Please verify your order status before retrying.' }
+});
+
+export const aiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTests,
+  message: { success: false, message: 'Too many AI requests. Please wait a few minutes before trying again.' }
 });
 
 export const sanitizeData = mongoSanitize();
