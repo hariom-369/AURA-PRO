@@ -1,12 +1,24 @@
-# --- build: Vite bakes env vars in at build time, so VITE_API_URL must be
-#     supplied as a build arg (docker build --build-arg VITE_API_URL=...) ---
+# Vite bakes env vars in at build time, so every VITE_* value the app reads
+# must be supplied as a build arg (docker build --build-arg VITE_API_URL=...
+# --build-arg VITE_FIREBASE_API_KEY=... etc.) — a build arg with no matching
+# ARG line below is silently dropped by Docker. Firebase Phone Auth is the
+# only sign-in method, so the four VITE_FIREBASE_* args are effectively
+# required for a working deployment via this Dockerfile.
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 ARG VITE_API_URL
-ENV VITE_API_URL=$VITE_API_URL
+ARG VITE_FIREBASE_API_KEY
+ARG VITE_FIREBASE_AUTH_DOMAIN
+ARG VITE_FIREBASE_PROJECT_ID
+ARG VITE_FIREBASE_APP_ID
+ENV VITE_API_URL=$VITE_API_URL \
+    VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY \
+    VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN \
+    VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID \
+    VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID
 RUN npm run build
 
 # --- runtime: static files served by nginx ---

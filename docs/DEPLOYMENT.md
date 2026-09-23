@@ -33,11 +33,19 @@ docker compose up
 - Server: `http://localhost:5000`
 - Client: `http://localhost:8080`
 
-The client's `VITE_API_URL` is baked in at **build time** (Vite inlines env vars into the JS bundle — there's no runtime config for a static SPA). To point a built client image at a different backend, rebuild with a different build arg:
+The client's env vars (`VITE_API_URL` and the four `VITE_FIREBASE_*`) are baked in at **build time** (Vite inlines them into the JS bundle — there's no runtime config for a static SPA). A build arg with no matching `ARG` line in `client/Dockerfile` is silently dropped by Docker, so all five must be passed explicitly:
 
 ```bash
-docker build --build-arg VITE_API_URL=https://api.yourdomain.com/api/v1 -t aura-pro-client ./client
+docker build \
+  --build-arg VITE_API_URL=https://api.yourdomain.com/api/v1 \
+  --build-arg VITE_FIREBASE_API_KEY=... \
+  --build-arg VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com \
+  --build-arg VITE_FIREBASE_PROJECT_ID=your-project-id \
+  --build-arg VITE_FIREBASE_APP_ID=... \
+  -t aura-pro-client ./client
 ```
+
+Omitting the four `VITE_FIREBASE_*` args builds a client where `isFirebaseConfigured()` is always `false` and `/login` permanently shows "Sign-in unavailable" — since Firebase Phone Auth is the only sign-in method, this isn't an optional/degrades-gracefully feature for this Dockerfile path the way it is for `VITE_API_URL`.
 
 ## CI
 
@@ -57,15 +65,15 @@ Pick per-service; they don't need to be the same host.
 - Any container host (AWS ECS/Fargate, Google Cloud Run, Azure Container Apps) using `server/Dockerfile`
 
 **Client** (static files only):
-- Vercel or Netlify — point at `client/`, build command `npm run build`, output directory `dist`, set `VITE_API_URL` as a build-time env var in their dashboard
-- Or serve the `client/Dockerfile` nginx image from any container host, same as the server
+- Vercel, Netlify, or Cloudflare Pages — point at `client/`, build command `npm run build`, output directory `dist`, set `VITE_API_URL` **and the four `VITE_FIREBASE_*` vars** as build-time env vars in their dashboard. Adding/changing them never affects an already-built deploy — trigger a new deployment afterward.
+- Or serve the `client/Dockerfile` nginx image from any container host, same as the server — pass all five as `--build-arg`s (see above)
 
 ### Checklist for going live
 
 1. Provision MongoDB Atlas for production, whitelist your server host's IP (or `0.0.0.0/0` if the host has dynamic egress IPs — tighten this once you know your host's IP range).
-2. Set every required env var on the server host (see `server/.env.example`); leave AI/Cloudinary/SMTP unset only if you're intentionally deferring those features — they degrade gracefully. `PAYOUT_ENCRYPTION_KEY` is the one exception that doesn't degrade gracefully for the feature it gates: if you're launching the seller marketplace, generate and set it before any seller reaches the payout step of onboarding, or that step fails closed with a 503 (by design — see `docs/MARKETPLACE.md`).
-3. Set `VITE_API_URL` to the server's real public URL when building the client.
+2. Set every required env var on the server host (see `server/.env.example`); leave AI/Cloudinary/Resend unset only if you're intentionally deferring those features — they degrade gracefully. `FIREBASE_PROJECT_ID`/`_CLIENT_EMAIL`/`_PRIVATE_KEY` (backend) and `VITE_FIREBASE_*` (frontend, build-time) are **required** — without them no one can sign in at all, since Firebase Phone Auth is the only sign-in method (see `docs/FIREBASE_AUTH.md`). `PAYOUT_ENCRYPTION_KEY` is the other exception that doesn't degrade gracefully for the feature it gates: if you're launching the seller marketplace, generate and set it before any seller reaches the payout step of onboarding, or that step fails closed with a 503 (by design — see `docs/MARKETPLACE.md`).
+3. Set `VITE_API_URL` (and the four `VITE_FIREBASE_*` vars) to their real values when building the client — a build-time var that's missing produces a client that permanently shows "Sign-in unavailable" on `/login` with no error in the console, since `isFirebaseConfigured()` fails closed rather than throwing.
 4. Create a **live-mode** Stripe webhook pointed at `https://your-api-domain/api/v1/webhooks/stripe`, and set its signing secret as `STRIPE_WEBHOOK_SECRET`.
 5. Update `CLIENT_URL` (and `ADMIN_URL` if different) on the server to your real client domain — this drives both CORS and Stripe checkout redirect URLs.
-6. Run `node seeds/seedAdmin.js <email> <password>` once against production to create your first real admin (or use the `ADMIN_SIGNUP_CODE` self-registration flow — set a strong, private value for it in production, or leave it unset to disable admin self-registration entirely).
+6. Sign in once through the live app with the phone number you want as your first admin, then run `node seeds/seedAdmin.js <phone-number>` against production to promote that account to admin.
 7. Confirm `npm test` is green in CI before merging to `main`.

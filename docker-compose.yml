@@ -22,6 +22,14 @@ services:
         # locally this is localhost:5000; override (`VITE_API_URL=... docker
         # compose build`) if the server is reachable at a different address.
         VITE_API_URL: ${VITE_API_URL:-http://localhost:5000/api/v1}
+        # Firebase Phone Auth is the only sign-in method — without these four,
+        # the built client always shows "Sign-in unavailable" (see
+        # docs/FIREBASE_AUTH.md). Set them in your shell or a `.env` file next
+        # to this compose file before running `docker compose build`.
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY:-}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN:-}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID:-}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID:-}
     ports:
       - '8080:80'
     depends_on:
