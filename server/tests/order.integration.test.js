@@ -2,22 +2,15 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import app from '../app.js';
 import Product from '../models/Product.js';
+import User from '../models/User.js';
 
-// Registration now requires OTP verification before an access token is
-// issued. SMTP is intentionally unconfigured in tests, so the server returns
-// the code via `devCode` (its non-production fallback) — complete that step
-// here so callers still get back a normal usable token.
+// Sign-in is Firebase Phone Auth only. These order/cart tests don't exercise
+// auth at all, so a test user is created directly rather than going through
+// a real (mocked) Firebase login — same session shape (generateAuthToken())
+// any login method produces.
 async function registerUser(email = 'buyer@example.com') {
-  const registerRes = await request(app)
-    .post('/api/v1/auth/register')
-    .send({ name: 'Buyer', email, password: 'password123', phone: '9876543210' });
-
-  const { pendingToken, devCode } = registerRes.body.data;
-  const verifyRes = await request(app)
-    .post('/api/v1/auth/verify-signup-otp')
-    .send({ pendingToken, code: devCode });
-
-  return verifyRes.body.data.token;
+  const user = await User.create({ name: 'Buyer', email, phone: '9876543210' });
+  return user.generateAuthToken();
 }
 
 describe('Order flow (register -> cart -> order)', () => {

@@ -1,17 +1,23 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 
 dotenv.config();
 
+// Firebase Phone Auth is the only sign-in method, so there is no email/
+// password to seed. Promotes an existing account (matched by phone number,
+// exactly as stored — the same value Firebase reports as `phone_number`,
+// e.g. "+15551234567") to admin. The account must already exist — sign in
+// with that phone number once first so `findOrCreateUserFromFirebase`
+// creates it, then run this script.
 const seedAdmin = async () => {
-  const adminEmail = process.argv[2];
-  const adminPassword = process.argv[3];
+  const phone = process.argv[2];
 
-  if (!adminEmail || !adminPassword) {
-    console.error('Error: Please provide email and password.');
-    console.log('Usage: node seeds/seedAdmin.js <email> <password>');
+  if (!phone) {
+    console.error('Error: Please provide the phone number of an existing account.');
+    console.log('Usage: node seeds/seedAdmin.js <phone-number>');
+    console.log('The phone number must match exactly what Firebase reports (e.g. +15551234567),');
+    console.log('and the account must already exist — sign in with it once first.');
     process.exit(1);
   }
 
@@ -23,24 +29,15 @@ const seedAdmin = async () => {
 
     await mongoose.connect(mongoUri);
 
-    const existingUser = await User.findOne({ email: adminEmail.toLowerCase() });
-
-    if (existingUser) {
-      existingUser.role = 'admin';
-      existingUser.password = adminPassword; // Triggers password hash middleware if present in schema
-      existingUser.isEmailVerified = true;
-      await existingUser.save();
-      console.log(`✓ Upgraded existing user (${adminEmail}) to ADMIN role.`);
-    } else {
-      await User.create({
-        name: 'System Admin',
-        email: adminEmail.toLowerCase(),
-        password: adminPassword,
-        role: 'admin',
-        isEmailVerified: true
-      });
-      console.log(`✓ Created new ADMIN user: ${adminEmail}`);
+    const user = await User.findOne({ phone });
+    if (!user) {
+      console.error(`No account found with phone number ${phone}. Sign in with it once first, then re-run this script.`);
+      process.exit(1);
     }
+
+    user.role = 'admin';
+    await user.save();
+    console.log(`✓ Promoted ${user.name} (${phone}) to ADMIN role.`);
 
     await mongoose.disconnect();
     process.exit(0);

@@ -123,24 +123,10 @@ const seedDatabase = async () => {
 
     console.log('Cleared existing junk database records.');
 
-    await User.create([
-      {
-        name: 'AURA Administrator',
-        email: 'admin@aurapro.com',
-        password: 'AdminPassword123!',
-        role: 'admin',
-        isEmailVerified: true
-      },
-      {
-        name: 'Demo Customer',
-        email: 'customer@aurapro.com',
-        password: 'CustomerPassword123!',
-        role: 'customer',
-        isEmailVerified: true
-      }
-    ]);
-
-    console.log('Created Admin and Customer accounts.');
+    // No demo users are seeded here — accounts only exist once someone signs
+    // in with Firebase Phone Auth (see services/firebasePhoneAuthService.js).
+    // To make a demo account an admin, sign in with it once, then run:
+    //   node seeds/seedAdmin.js <phone-number>
 
     // Use create() (not insertMany) so the pre-save hook derives basePriceInPaise,
     // discountPercentage, and primaryImage from the legacy display fields above.

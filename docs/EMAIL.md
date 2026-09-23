@@ -1,6 +1,8 @@
-# Email (SMTP) Setup
+# Email (Resend)
 
-AURA PRO sends two kinds of email: **OTP codes** (signup verification, login 2FA — see `server/services/otpService.js`) and **order notifications** (confirmation, status updates, low-stock alerts). Both go through `server/services/emailService.js`, which wraps a single Nodemailer SMTP transporter configured entirely by environment variables — no provider-specific code.
+AURA PRO sends **order notification emails only** — confirmation, status updates, and low-stock alerts to admins. These go through `server/services/emailService.js`, which wraps the official [Resend](https://resend.com) Node.js SDK. There is no OTP or account email of any kind — sign-in is [Firebase Phone Authentication](FIREBASE_AUTH.md), which never involves email.
+
+This app previously used Gmail SMTP. It was replaced because Gmail SMTP connections from most cloud hosts (including Render) are unreliable — frequently rejected outright (`ENETUNREACH`, connection timeouts) since providers commonly block outbound SMTP ports (25/465/587) on shared infrastructure to fight spam. Resend sends over a normal HTTPS API call, which isn't affected by that class of problem.
 
 ## Environment variables
 
@@ -8,114 +10,72 @@ Set these in `server/.env` (see `server/.env.example` for the full annotated lis
 
 | Variable | Purpose |
 | --- | --- |
-| `SMTP_HOST` | Your provider's SMTP hostname |
-| `SMTP_PORT` | `587` (STARTTLS, most common) or `465` (implicit TLS) |
-| `SMTP_USER` | SMTP username (often your full email, or an API key for some providers) |
-| `SMTP_PASSWORD` | SMTP password / app password / API key |
-| `EMAIL_FROM_ADDRESS` | The "from" address recipients see |
+| `RESEND_API_KEY` | Your Resend API key — get one at [resend.com/api-keys](https://resend.com/api-keys) |
+| `EMAIL_FROM_ADDRESS` | The "from" address recipients see — must be on a domain you've verified with Resend (see below), or the special `onboarding@resend.dev` testing address |
 | `EMAIL_FROM_NAME` | The "from" display name (defaults to `AURA PRO`) |
-| `OTP_DEV_FALLBACK` | Dev-only escape hatch — see [Local development](#local-development-without-smtp) below |
 
-**If `SMTP_HOST`/`SMTP_USER`/`SMTP_PASSWORD` are all left blank**, `isEmailConfigured()` returns `false` and the app degrades gracefully everywhere except OTP delivery, which is covered separately below.
+**If `RESEND_API_KEY` is left blank**, `isEmailConfigured()` returns `false` and order emails are logged instead of sent — this never blocks checkout or any other core flow, since order emails are strictly best-effort notifications.
 
-## Choosing a provider
+## Getting a Resend API key
 
-**For local development**, a Gmail account with an App Password is the fastest path (no signup, no verification wait):
-1. Enable 2-Step Verification on the Google account: [myaccount.google.com/security](https://myaccount.google.com/security)
-2. Create an App Password: [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) → app "Mail" → copy the 16-character password
-3. Set:
-   ```
-   SMTP_HOST=smtp.gmail.com
-   SMTP_PORT=587
-   SMTP_USER=youraddress@gmail.com
-   SMTP_PASSWORD=<the 16-character app password, no spaces>
-   ```
+1. Sign up at [resend.com](https://resend.com) (free tier: 3,000 emails/month, 100/day — plenty for order volume at small-to-medium scale).
+2. Go to [resend.com/api-keys](https://resend.com/api-keys) → **Create API Key**. For this app, a key with **Sending access** only is enough — it never needs to manage domains, contacts, etc. through the API.
+3. Copy the key (starts with `re_`) into `RESEND_API_KEY` in `server/.env` (and in your Render environment variables for production — see [Production configuration](#production-render) below).
 
-**For production**, use a real transactional provider — Gmail is not meant for production volume/deliverability. Any of these work as-is (same SMTP interface, just different host/credentials):
+### ⚠️ You must verify a sending domain before real production delivery
 
-| Provider | SMTP host | Notes |
-| --- | --- | --- |
-| [Brevo](https://www.brevo.com) | `smtp-relay.brevo.com` | Generous free tier, good for starting out |
-| [Resend](https://resend.com) | `smtp.resend.com` | Developer-friendly, simple setup |
-| [SendGrid](https://sendgrid.com) | `smtp.sendgrid.net` | `SMTP_USER=apikey`, `SMTP_PASSWORD=<your API key>` |
-| [Mailgun](https://mailgun.com) | `smtp.mailgun.org` | Requires domain verification (SPF/DKIM) before sending |
-| [Amazon SES](https://aws.amazon.com/ses/) | region-specific | Cheapest at scale, more setup (domain verification, sending limits) |
+Resend will not deliver mail from an address on a domain it hasn't verified you control — this is the single most common "I set the API key but nothing arrives" cause, same role Gmail's SPF/DKIM alignment played before.
 
-Whichever you pick, **verify your sending domain** (SPF/DKIM records) once you're past initial testing — unverified domains get flagged as spam by most inbox providers.
+1. In the Resend dashboard: **Domains → Add Domain**, enter a domain you own (e.g. `aurapro.com`, or a subdomain like `mail.aurapro.com`).
+2. Add the DNS records Resend gives you (SPF, DKIM, and typically a DMARC record) at your domain registrar/DNS host. Verification is usually near-instant once DNS propagates, but can take up to ~30 minutes.
+3. Once verified, set `EMAIL_FROM_ADDRESS` to any address `@yourdomain.com` — you don't need to create real mailboxes for it, just the DNS records.
 
-### ⚠️ The most common "it says sent but I never got it" cause
+**Until you've done this**, use the built-in `onboarding@resend.dev` sender for local development — it works with zero setup, but Resend restricts it to only deliver to the email address on your own Resend account. This is enforced by Resend itself, not this app.
 
-**`EMAIL_FROM_ADDRESS` must match `SMTP_USER` when using Gmail or Outlook/Office365.** These providers accept the SMTP transaction either way (Nodemailer will report `success: true`, and it genuinely isn't lying — the message really was accepted for delivery), but if the `From:` address doesn't match the authenticated account, the message's DKIM signature (signed for `gmail.com`) won't align with the claimed From domain. That fails DMARC on the *receiving* server, which then silently drops or spam-filters the message — invisibly, with no bounce, nothing Nodemailer can detect or report.
+## Local development without Resend
 
-This app detects the misconfiguration itself and logs a warning (`email_from_address_mismatch`) the first time it happens — but the underlying fix is simply:
-```
-SMTP_USER=youraddress@gmail.com
-EMAIL_FROM_ADDRESS=youraddress@gmail.com   # ← must be the same address
-```
-If you want a *different*, branded From address (e.g. `orders@aurapro.com`) while authenticating as a personal Gmail account, you'd need to add it as a verified "Send As" alias in Gmail's own settings (Settings → Accounts → Send mail as) — or, more simply, switch to a domain-verified transactional provider (Brevo/Resend/SendGrid/Mailgun/SES), where any address on your verified sending domain works without this restriction.
-
-**How to tell this is happening:** `verifyEmailConnection()` returning `{ ok: true }` only proves your credentials and connection work — it sends nothing and can't detect this. The real signal is in the server log: an `email_sent` entry with a real `smtpResponse` (e.g. `250 2.0.0 OK ... gsmtp`) for every attempt, but nothing ever arrives. That combination — success logged, provider is Gmail/Outlook, `EMAIL_FROM_ADDRESS` ≠ `SMTP_USER` — is this exact issue.
-
-## Local development without SMTP
-
-If you haven't configured SMTP yet, OTP registration/login still work: the code is logged to the server console and returned in the API response as `devCode`, and the UI shows it in an amber "Dev mode" banner instead of a real email. This is controlled by two **independent, explicit** gates in `otpService.js` — both must allow it:
-
-1. `NODE_ENV` must not be `production` (hardcoded — not configurable, no exceptions)
-2. `OTP_DEV_FALLBACK` must not be set to `false` (defaults to allowed; set to `false` in your `.env` to disable it even in dev)
-
-**In production, if email delivery fails, the request fails with a clear 503 error instead** — the OTP is never exposed as a fallback. This is enforced in code, not just by convention (`server/tests/otp.test.js` has dedicated tests asserting no `devCode` ever appears in a production response).
+If you haven't configured `RESEND_API_KEY`, the app works completely normally — order confirmation/status/low-stock emails are simply logged (`email_skipped_not_configured`) instead of sent. Nothing about sign-in, checkout, or any other flow depends on email being configured, since there is no OTP or account-verification email anymore.
 
 ## Testing real delivery
 
-### Without any real inbox (Ethereal — recommended first check)
-
-Nodemailer can spin up a temporary, real SMTP test account with **zero signup**. This sends over a genuine SMTP connection and gives you a shareable preview link to see the actual rendered email:
-
-```bash
-cd server
-node -e "
-import('nodemailer').then(async ({ default: nodemailer }) => {
-  const testAccount = await nodemailer.createTestAccount();
-  process.env.SMTP_HOST = testAccount.smtp.host;
-  process.env.SMTP_PORT = String(testAccount.smtp.port);
-  process.env.SMTP_USER = testAccount.user;
-  process.env.SMTP_PASSWORD = testAccount.pass;
-
-  const emailService = await import('./services/emailService.js');
-  const result = await emailService.sendOtpEmail('you@example.com', '123456', 'SIGNUP_VERIFICATION');
-  console.log(result); // check the server log line above for a previewUrl
-});
-"
-```
-
-Watch the console — `email_sent` log lines include a `previewUrl` field whenever the transporter is an Ethereal test account (this is automatically a no-op for every real provider, safe to leave in permanently).
-
-### With your real SMTP credentials
-
-1. Fill in `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASSWORD` in `server/.env`
-2. Verify the connection without sending anything:
+1. Fill in `RESEND_API_KEY` (and, once verified, a real domain's `EMAIL_FROM_ADDRESS`) in `server/.env`.
+2. Verify the API key without sending anything:
    ```bash
    cd server
    node -e "import('dotenv/config').then(() => import('./services/emailService.js')).then(m => m.verifyEmailConnection()).then(console.log)"
    ```
-   `{ ok: true }` means your credentials and connection are valid.
-3. Register a real account through the app (`http://localhost:5173/register`) using an email address you can actually check, and confirm the code arrives.
+   `{ ok: true }` means your API key is valid. This does **not** prove a specific From address/domain will deliver — that's confirmed by an actual send (next step).
+3. Place a real order through the app (checkout with the test-mode Stripe card, `4242 4242 4242 4242`) using an account whose profile email you can actually check, and confirm the confirmation email arrives. With `onboarding@resend.dev` as your From address, this only works if that email is the same one on your Resend account.
+4. For a specific one-off send (e.g. to test a template change) without placing a real order:
+   ```bash
+   cd server
+   node -e "import('dotenv/config').then(() => import('./services/emailService.js')).then(m => m.sendLowStockAlertEmail('you@example.com', { name: 'Test Product', sku: 'TEST-1', stock: 2, lowStockThreshold: 5 })).then(console.log)"
+   ```
 
-### In production
+## Production configuration (Render) {#production-render}
 
-Same as above, but set the environment variables on your hosting platform (see `docs/DEPLOYMENT.md`) rather than a local `.env` file, and make sure `NODE_ENV=production` is set — that's what fully disables the dev fallback.
+Set these in your Render service's **Environment** tab:
+
+| Variable | Value |
+| --- | --- |
+| `RESEND_API_KEY` | Your real Resend API key |
+| `EMAIL_FROM_ADDRESS` | An address on a domain verified in the Resend dashboard (never `onboarding@resend.dev` in production — it can't deliver to arbitrary recipients) |
+| `EMAIL_FROM_NAME` | `AURA PRO` (or your preferred display name) |
+| `NODE_ENV` | `production` |
+
+If order emails aren't arriving in production, check (in order): the domain verification status in the Resend dashboard, the `email_rejected_by_provider` / `email_send_failed` log lines (see below) for the actual Resend error, and that `EMAIL_FROM_ADDRESS` is really on the verified domain.
 
 ## Diagnostic logging
 
-`server/services/emailService.js` logs (never including the OTP code, password, or SMTP credentials):
+`server/services/emailService.js` logs (never including the API key or any other credential):
 
-- `email_sent` — includes the provider's raw SMTP response line (e.g. `250 2.0.0 OK ...`) and, for Ethereal test accounts only, a `previewUrl`
-- `email_rejected_by_provider` — the SMTP transaction resolved without throwing, but the target recipient wasn't in the provider's `accepted` list (a real, explicit rejection at the protocol level)
-- `email_send_failed` — `sendMail()` threw (auth failure, network error, etc.), with the real error message
-- `email_from_address_mismatch` — logged once, the first time a Gmail/Outlook-style host is used with a `From:` address that doesn't match the authenticated account (see the warning box above)
+- `email_sent` — includes Resend's own message id for the sent email
+- `email_rejected_by_provider` — Resend's API call resolved (no exception) but returned an `error` instead of a successful `data` — includes the error's `name` (e.g. `invalid_from_address`, `rate_limit_exceeded`) and `message`
+- `email_send_failed` — the API call itself threw (network failure, etc.), with the real error message
+- `email_skipped_not_configured` — `RESEND_API_KEY` isn't set; logged at `info`, not `error`, since this is expected in dev
 
-None of these ever report success unless the provider's own response confirms the recipient was accepted — a resolved promise alone is not treated as proof of delivery.
+None of these ever report success unless Resend's own response confirms the message was accepted (a `data.id` with no `error`) — a resolved promise alone is not treated as proof, and unlike a thrown exception, Resend's SDK resolves even on a rejected send, so `sendEmail()` explicitly checks for `error` on every call rather than relying on try/catch alone.
 
 ## A note on the test suite
 
-`server/tests/setup.js` forcibly blanks `SMTP_*`, `STRIPE_*`, `GEMINI_API_KEY`, and `CLOUDINARY_*` before any test file is imported, regardless of what's configured in your real `server/.env`. This matters: `app.js` calls `dotenv.config()` at import time, and dotenv never overwrites a `process.env` key that's already set — so once you configure real credentials for local development, the test suite needs to explicitly protect itself from picking them up, or `npm test` would start making real (and, for OTP tests specifically, repeated/automated-looking) calls to your real SMTP provider on every run.
+`server/tests/setup.js` forcibly blanks `RESEND_API_KEY`, `STRIPE_*`, `GEMINI_API_KEY`, `CLOUDINARY_*`, and `FIREBASE_*` before any test file is imported, regardless of what's configured in your real `server/.env`. This matters: `app.js` calls `dotenv.config()` at import time, and dotenv never overwrites a key that's already present in `process.env` — so once you configure real credentials for local development, the test suite needs to explicitly protect itself from picking them up, or `npm test` would start making real calls to your real Resend account on every run. `server/tests/emailDelivery.test.js` mocks the Resend SDK directly (`vi.mock('resend', ...)`) to test the request/response handling — including the "resolves with an error instead of throwing" case that's specific to how Resend's SDK behaves — without ever calling the real API.

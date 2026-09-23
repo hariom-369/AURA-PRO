@@ -1,74 +1,47 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import logger from '../utils/logger.js';
 
 const BRAND_COLOR = '#6366f1';
 const BRAND_DARK = '#18181b';
 
-let transporter = null;
-let transporterInitAttempted = false;
+let resendClient = null;
+let resendInitAttempted = false;
 
-function getTransporter() {
-  if (transporterInitAttempted) return transporter;
-  transporterInitAttempted = true;
+function getResendClient() {
+  if (resendInitAttempted) return resendClient;
+  resendInitAttempted = true;
 
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
+  if (!process.env.RESEND_API_KEY) {
     return null;
   }
 
-  transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: Number(process.env.SMTP_PORT) === 465,
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
-  });
-
-  return transporter;
+  resendClient = new Resend(process.env.RESEND_API_KEY);
+  return resendClient;
 }
 
 export function isEmailConfigured() {
-  return Boolean(getTransporter());
+  return Boolean(getResendClient());
 }
 
-// Providers known to reject/mis-deliver mail where the From: address doesn't
-// match (or isn't a verified alias of) the authenticated account. A mismatch
-// here doesn't fail the SMTP transaction — the provider still returns 250 OK
-// — but DKIM/SPF alignment fails on the receiving end and the message gets
-// silently dropped or spam-filtered. This is the single most common cause of
-// "verifyEmailConnection() says ok, but no email arrives".
-const STRICT_FROM_ALIGNMENT_HOSTS = ['gmail.com', 'googlemail.com', 'outlook.com', 'office365.com'];
-
-let fromMismatchWarned = false;
-function warnIfFromAddressMismatched() {
-  if (fromMismatchWarned) return;
-  const host = (process.env.SMTP_HOST || '').toLowerCase();
-  const isStrictHost = STRICT_FROM_ALIGNMENT_HOSTS.some((h) => host.includes(h));
-  const fromAddress = (process.env.EMAIL_FROM_ADDRESS || '').toLowerCase();
-  const smtpUser = (process.env.SMTP_USER || '').toLowerCase();
-
-  if (isStrictHost && fromAddress && smtpUser && fromAddress !== smtpUser) {
-    fromMismatchWarned = true;
-    logger.warn('email_from_address_mismatch', {
-      host: process.env.SMTP_HOST,
-      fromAddress: process.env.EMAIL_FROM_ADDRESS,
-      hint:
-        'EMAIL_FROM_ADDRESS does not match SMTP_USER on a provider that enforces From/auth alignment (Gmail/Outlook). ' +
-        'The SMTP transaction will report success, but the receiving mail server will likely fail DKIM/SPF alignment ' +
-        'and silently drop or spam-filter the message. Set EMAIL_FROM_ADDRESS to the same address as SMTP_USER, or ' +
-        'configure a verified "Send As" alias with that provider, or switch to a domain-verified transactional ' +
-        'provider (SendGrid/Brevo/Resend/Mailgun/SES) where any From address on a verified domain works.',
-    });
-  }
-}
-
-// Verifies the SMTP connection/credentials without sending anything — useful
-// for a startup check or a one-off `node -e` diagnostic (see docs/EMAIL.md).
+// Resend is an HTTP API, not SMTP, so there's no connection handshake to
+// "verify" the way nodemailer's transporter.verify() did. The closest
+// side-effect-free proof that RESEND_API_KEY is real is a lightweight,
+// read-only API call — domains.list() doubles as a hint about whether your
+// sending domain is verified yet (the most common reason for a rejected
+// send). A `restricted_api_key` error here still proves the key itself is
+// valid (Resend recognized and authenticated it) — it just means this
+// specific key doesn't have permission to list domains, which is common and
+// fine for a send-only key, so that case is *not* treated as a failure.
 export async function verifyEmailConnection() {
-  const activeTransporter = getTransporter();
-  if (!activeTransporter) {
+  const client = getResendClient();
+  if (!client) {
     return { ok: false, reason: 'not_configured' };
   }
   try {
-    await activeTransporter.verify();
+    const { error } = await client.domains.list();
+    if (error && error.name !== 'restricted_api_key') {
+      return { ok: false, reason: error.message };
+    }
     return { ok: true };
   } catch (error) {
     return { ok: false, reason: error.message };
@@ -118,59 +91,50 @@ function renderEmailLayout({ title, bodyHtml }) {
   `;
 }
 
-// Every outbound email routes through here. If SMTP isn't configured, this
-// logs and returns success:false instead of throwing — order/status emails
-// are best-effort notifications and must never break checkout or any other
-// core flow. (OTP delivery is treated differently at the call site in
-// otpService.js, since a failed OTP email genuinely blocks the user.)
+// Every outbound email routes through here. If Resend isn't configured, this
+// logs and returns success:false instead of throwing — these are all
+// best-effort notifications (order confirmation/status, low-stock alerts)
+// and must never break checkout or any other core flow.
 async function sendEmail({ to, subject, html }) {
-  const activeTransporter = getTransporter();
-  if (!activeTransporter) {
+  const client = getResendClient();
+  if (!client) {
     logger.info('email_skipped_not_configured', { to, subject });
     return { success: false, reason: 'not_configured' };
   }
 
-  warnIfFromAddressMismatched();
-
   try {
     const fromName = process.env.EMAIL_FROM_NAME || 'AURA PRO';
     const fromAddress = process.env.EMAIL_FROM_ADDRESS || 'orders@aurapro.com';
-    const info = await activeTransporter.sendMail({
-      from: `"${fromName}" <${fromAddress}>`,
+
+    // Resend's SDK does NOT throw on an API-level rejection — a rejected
+    // send still resolves, just with `error` set instead of `data`. A
+    // *thrown* exception here means the request itself never completed
+    // (network failure, etc.), handled in the catch block below. Either way,
+    // this never silently reports success — success is only ever returned
+    // when Resend's own response confirms the message was accepted.
+    const { data, error } = await client.emails.send({
+      from: `${fromName} <${fromAddress}>`,
       to,
       subject,
       html,
     });
 
-    // A 250-OK response from the SMTP server is NOT proof of inbox delivery —
-    // it only means the provider accepted the message for onward handling.
-    // `accepted`/`rejected` (SMTP-level per-recipient outcome) is the most
-    // this process can ever observe; anything past that (spam filtering,
-    // DMARC drops) happens on servers we have no visibility into. Still,
-    // treat an explicit rejection of our one recipient as a real failure
-    // rather than reporting success.
-    const wasAccepted = (info.accepted || []).some((addr) => String(addr).toLowerCase().includes(to.toLowerCase()));
-    if (!wasAccepted) {
+    if (error) {
+      // `invalid_from_address` is Resend's equivalent of the old Gmail
+      // DKIM/SPF-alignment gotcha this app used to detect for SMTP: the API
+      // call completes, but the message is rejected because
+      // EMAIL_FROM_ADDRESS's domain isn't verified in the Resend dashboard
+      // yet (Domains -> Add Domain -> add the DNS records it gives you).
       logger.error('email_rejected_by_provider', {
         to,
         subject,
-        accepted: info.accepted,
-        rejected: info.rejected,
-        response: info.response,
+        errorName: error.name,
+        errorMessage: error.message,
       });
-      return { success: false, reason: 'rejected_by_provider' };
+      return { success: false, reason: error.message };
     }
 
-    // Only ever set for Ethereal test accounts (nodemailer.createTestAccount) —
-    // a no-op for every real provider. Handy for verifying delivery in dev
-    // without needing a real inbox; see docs/EMAIL.md.
-    const previewUrl = nodemailer.getTestMessageUrl(info);
-    logger.info('email_sent', {
-      to,
-      subject,
-      smtpResponse: info.response,
-      previewUrl: previewUrl || undefined,
-    });
+    logger.info('email_sent', { to, subject, emailId: data.id });
     return { success: true };
   } catch (error) {
     logger.error('email_send_failed', { to, subject, error: error.message });
@@ -210,41 +174,6 @@ export const sendOrderStatusEmail = async (order, customerEmail, note = '') => {
     subject: `Order Update — ${order.orderNumber} is now ${order.status}`,
     html: renderEmailLayout({ bodyHtml: body }),
   });
-};
-
-const OTP_PURPOSE_COPY = {
-  SIGNUP_VERIFICATION: {
-    subject: 'Verify your email — AURA PRO',
-    heading: 'Confirm your email address',
-    body: "Enter this code to finish creating your AURA PRO account. If you didn't create an account, you can safely ignore this email.",
-  },
-  LOGIN: {
-    subject: 'Your sign-in code — AURA PRO',
-    heading: "Confirm it's you",
-    body: "Enter this code to finish signing in to AURA PRO. If this wasn't you, you can safely ignore this email — your account is still secure.",
-  },
-  PASSWORD_RESET: {
-    subject: 'Reset your password — AURA PRO',
-    heading: 'Reset your password',
-    body: "Enter this code to choose a new password for your AURA PRO account. If you didn't request this, you can safely ignore this email — your password won't be changed.",
-  },
-};
-
-export const sendOtpEmail = async (email, code, purpose) => {
-  const copy = OTP_PURPOSE_COPY[purpose] || OTP_PURPOSE_COPY.LOGIN;
-  const body = `
-    <h2 style="margin: 0 0 8px; font-size: 20px; color: #18181b;">${copy.heading}</h2>
-    <p style="margin: 0 0 24px; font-size: 14px; color: #71717a; line-height: 1.6;">${copy.body}</p>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-      <tr>
-        <td align="center" style="background-color: #f4f4f5; border-radius: 12px; padding: 20px;">
-          <span style="font-size: 36px; font-weight: 800; letter-spacing: 10px; color: ${BRAND_DARK}; font-family: 'Courier New', monospace;">${code}</span>
-        </td>
-      </tr>
-    </table>
-    <p style="margin: 20px 0 0; font-size: 13px; color: #a1a1aa; text-align: center;">This code expires in 10 minutes.</p>
-  `;
-  return sendEmail({ to: email, subject: copy.subject, html: renderEmailLayout({ bodyHtml: body }) });
 };
 
 export const sendLowStockAlertEmail = async (adminEmail, product) => {

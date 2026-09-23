@@ -1,36 +1,36 @@
 import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
-    password: { type: String, required: true },
+    // Plain profile metadata only — not used for authentication. Optional
+    // because a Firebase phone-auth account never supplies one. `sparse`
+    // matters because it's no longer true that every document has this field
+    // — without it, the *second* user with no email at all would collide
+    // with the first on MongoDB's shared "field absent" index entry (the
+    // same class of bug fixed for Order.idempotencyKey earlier).
+    email: {
+      type: String,
+      unique: true,
+      sparse: true,
+      lowercase: true,
+      trim: true,
+      index: true,
+    },
     phone: { type: String, default: '', index: true },
     role: { type: String, enum: ['customer', 'admin'], default: 'customer' },
     avatar: { type: String, default: '' },
     isActive: { type: Boolean, default: true },
-    isEmailVerified: { type: Boolean, default: false }
+    // Set only for accounts created via, or claimed through, Firebase Phone
+    // Auth. Firebase's own uid is already globally unique per Firebase user,
+    // so this is the sole identity anchor for login — the only way a User
+    // document can ever authenticate (see docs/FIREBASE_AUTH.md).
+    firebaseUid: { type: String, unique: true, sparse: true, index: true },
+    phoneVerified: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
-
-const BCRYPT_HASH_PATTERN = /^\$2[aby]\$\d{2}\$.{53}$/;
-
-userSchema.pre('save', async function () {
-  if (!this.isModified('password')) return;
-  // Already a bcrypt hash — e.g. handed off pre-hashed from PendingRegistration
-  // once OTP verification succeeds. Re-hashing it would hash the hash, and no
-  // plaintext password would ever compare equal to it again.
-  if (BCRYPT_HASH_PATTERN.test(this.password)) return;
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
-});
-
-userSchema.methods.comparePassword = async function (enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
-};
 
 // Add missing token generation method
 userSchema.methods.generateAuthToken = function () {

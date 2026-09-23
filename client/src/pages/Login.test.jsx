@@ -1,15 +1,25 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { AllProviders } from '../test/testUtils';
-import Login from './Login';
+
+vi.mock('../config/firebase', () => ({
+  isFirebaseConfigured: () => true,
+}));
+
+vi.mock('../services/firebaseAuthService', () => ({
+  sendPhoneVerificationCode: vi.fn(),
+  confirmPhoneVerificationCode: vi.fn(),
+  resetRecaptcha: vi.fn(),
+  isFirebaseConfigured: () => true,
+}));
+
+const { default: Login } = await import('./Login');
 
 describe('Login page', () => {
-  it('renders identifier/password fields and links to register and password reset', () => {
+  it('renders the phone sign-in flow directly, with no email/password form', () => {
     render(<Login />, { wrapper: AllProviders });
-    expect(screen.getByPlaceholderText(/email or mobile number/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/^password$/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /create an account/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /forgot your password/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('+1 650 555 3434')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /send code/i })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/^password$/i)).not.toBeInTheDocument();
   });
 });

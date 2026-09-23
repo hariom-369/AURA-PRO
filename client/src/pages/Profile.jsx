@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSeller } from '../context/SellerContext';
 import { useToast } from '../context/ToastContext';
-import { updateProfile, changePassword, uploadAvatar } from '../services/authService';
+import { updateProfile, uploadAvatar } from '../services/authService';
 
 const FALLBACK_AVATAR = 'https://api.dicebear.com/9.x/initials/svg?seed=';
 
@@ -15,11 +15,6 @@ export default function Profile() {
   const [form, setForm] = useState({ name: user?.name || '', phone: user?.phone || '' });
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileError, setProfileError] = useState('');
-
-  const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '' });
-  const [savingPassword, setSavingPassword] = useState(false);
-  const [passwordError, setPasswordError] = useState('');
-  const [passwordSuccess, setPasswordSuccess] = useState('');
 
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
@@ -39,22 +34,6 @@ export default function Profile() {
       setProfileError(err.response?.data?.message || 'Could not update profile');
     } finally {
       setSavingProfile(false);
-    }
-  };
-
-  const handlePasswordSubmit = async (e) => {
-    e.preventDefault();
-    setSavingPassword(true);
-    setPasswordError('');
-    setPasswordSuccess('');
-    try {
-      await changePassword(pwForm);
-      setPwForm({ currentPassword: '', newPassword: '' });
-      setPasswordSuccess('Password changed successfully');
-    } catch (err) {
-      setPasswordError(err.response?.data?.message || 'Could not change password');
-    } finally {
-      setSavingPassword(false);
     }
   };
 
@@ -102,7 +81,7 @@ export default function Profile() {
                 {user.role === 'admin' ? 'Administrator' : 'Customer'}
               </span>
             </div>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">{user.email}</p>
+            {user.email && <p className="text-sm text-zinc-500 dark:text-zinc-400">{user.email}</p>}
             {user.createdAt && (
               <p className="mt-0.5 text-xs text-zinc-400">
                 Member since {new Date(user.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long' })}
@@ -156,41 +135,9 @@ export default function Profile() {
             <label className="text-xs font-medium text-zinc-500">Phone number</label>
             <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className={`mt-1 w-full ${inputClass}`} />
           </div>
-          <div className="sm:col-span-2">
-            <label className="text-xs font-medium text-zinc-500">Email address</label>
-            <input value={user.email} disabled className={`mt-1 w-full cursor-not-allowed opacity-60 ${inputClass}`} />
-          </div>
         </div>
         <button type="submit" disabled={savingProfile} className="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">
           {savingProfile ? 'Saving...' : 'Save Changes'}
-        </button>
-      </form>
-
-      <form onSubmit={handlePasswordSubmit} className="mt-6 rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">Change Password</h3>
-        {passwordError && <p className="mt-2 text-sm text-rose-500">{passwordError}</p>}
-        {passwordSuccess && <p className="mt-2 text-sm text-emerald-500">{passwordSuccess}</p>}
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <input
-            type="password"
-            placeholder="Current password"
-            required
-            value={pwForm.currentPassword}
-            onChange={(e) => setPwForm({ ...pwForm, currentPassword: e.target.value })}
-            className={inputClass}
-          />
-          <input
-            type="password"
-            placeholder="New password"
-            required
-            minLength={8}
-            value={pwForm.newPassword}
-            onChange={(e) => setPwForm({ ...pwForm, newPassword: e.target.value })}
-            className={inputClass}
-          />
-        </div>
-        <button type="submit" disabled={savingPassword} className="mt-4 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-bold text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900">
-          {savingPassword ? 'Updating...' : 'Change Password'}
         </button>
       </form>
     </div>

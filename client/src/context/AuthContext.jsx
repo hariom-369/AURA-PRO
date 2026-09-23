@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import API from '../api/axios';
-import { verifySignupOtp, verifyLoginOtp, resendOtp as resendOtpRequest } from '../services/authService';
 
 const AuthContext = createContext();
 
@@ -31,26 +30,14 @@ export const AuthProvider = ({ children }) => {
     setUser(data.user);
   };
 
-  // Both now return { pendingToken, purpose, email, devCode?, emailSent } —
-  // no session is created until the OTP step completes via verifyOtp below.
-  const login = async (credentials) => {
-    const { data } = await API.post('/auth/login', credentials);
-    return data.data;
-  };
-
-  const register = async (userData) => {
-    const { data } = await API.post('/auth/register', userData);
-    return { ...data.data, purpose: 'SIGNUP_VERIFICATION' };
-  };
-
-  const verifyOtp = async ({ pendingToken, code, purpose }) => {
-    const verify = purpose === 'LOGIN' ? verifyLoginOtp : verifySignupOtp;
-    const data = await verify({ pendingToken, code });
+  // Firebase Phone Auth's own verification already confirmed the user (see
+  // firebaseAuthService.js's confirmPhoneVerificationCode, which returns
+  // { user, token }) — this is the single integration point every session,
+  // new or returning, goes through.
+  const completeFirebasePhoneLogin = (data) => {
     applySession(data);
     return data;
   };
-
-  const resendOtp = (pendingToken, purpose) => resendOtpRequest({ pendingToken, purpose });
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -62,7 +49,7 @@ export const AuthProvider = ({ children }) => {
   const updateUser = (patch) => setUser((prev) => (prev ? { ...prev, ...patch } : prev));
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, verifyOtp, resendOtp, logout, updateUser }}>
+    <AuthContext.Provider value={{ user, loading, logout, updateUser, completeFirebasePhoneLogin }}>
       {children}
     </AuthContext.Provider>
   );

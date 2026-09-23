@@ -17,17 +17,18 @@ process.env.MARKETPLACE_DEFAULT_COMMISSION_PERCENT = process.env.MARKETPLACE_DEF
 // (even an empty string counts as present). So setting these to '' here,
 // in this setupFile (which vitest guarantees runs before test files are
 // imported), permanently wins over whatever real credentials later end up
-// in server/.env — tests can never silently start hitting real SMTP/Stripe/
-// Gemini/Cloudinary, no matter what gets configured for local dev.
-process.env.SMTP_HOST = '';
-process.env.SMTP_USER = '';
-process.env.SMTP_PASSWORD = '';
+// in server/.env — tests can never silently start hitting real Resend/Stripe/
+// Gemini/Cloudinary/Firebase, no matter what gets configured for local dev.
+process.env.RESEND_API_KEY = '';
 process.env.STRIPE_SECRET_KEY = '';
 process.env.STRIPE_WEBHOOK_SECRET = '';
 process.env.GEMINI_API_KEY = '';
 process.env.CLOUDINARY_CLOUD_NAME = '';
 process.env.CLOUDINARY_API_KEY = '';
 process.env.CLOUDINARY_API_SECRET = '';
+process.env.FIREBASE_PROJECT_ID = '';
+process.env.FIREBASE_CLIENT_EMAIL = '';
+process.env.FIREBASE_PRIVATE_KEY = '';
 
 let mongod;
 

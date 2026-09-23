@@ -3,11 +3,16 @@
 Base URL: `http://localhost:5000/api/v1` (dev). All responses follow `{ statusCode, data, message, success }`. Auth: `Authorization: Bearer <token>`.
 
 ## Auth
+
+Sign-in is Firebase Phone Authentication only — see [FIREBASE_AUTH.md](FIREBASE_AUTH.md). There is no email/password/OTP login.
+
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/auth/register` | Public | `{ name, email, password }` |
-| POST | `/auth/login` | Public | `{ email, password }` |
+| GET | `/auth/firebase/status` | Public | `{ available }` — whether Firebase is configured |
+| POST | `/auth/firebase/phone-login` | Public | `{ idToken }` — a Firebase ID token, exchanged for `{ user, token }` |
 | GET | `/auth/me` | User | |
+| PATCH | `/auth/me` | User | `{ name?, phone? }` |
+| POST | `/auth/me/avatar` | User | multipart `avatar` field → Cloudinary |
 
 ## Products
 | Method | Path | Auth | Notes |

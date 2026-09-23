@@ -24,7 +24,7 @@ All AI endpoints live under `/api/v1/ai` and share one rule: **the model must gr
 
 ### Core E-Commerce
 
-JWT auth with OTP-gated signup and login 2FA — **no account is ever created in the database until its email OTP is verified** (registration details are held in a short-lived `PendingRegistration` until then); login accepts either an email or mobile number; forgot/reset-password reuses the same OTP infrastructure with an enumeration-safe response (identical whether or not the email exists). Also: cart, wishlist, saved addresses, product reviews with verified-purchase detection, coupons, full order lifecycle (PENDING → CONFIRMED → SHIPPED → DELIVERED, plus RETURN_REQUESTED/RETURNED/REFUNDED), Stripe Checkout with webhook-confirmed payment, admin product CRUD with Cloudinary image upload, admin order/return management, and an analytics dashboard (revenue trend, top products, low-stock alerts) built with `recharts`.
+Authentication is **Firebase Phone Authentication only** — a user proves ownership of a phone number via a real SMS code (Firebase-verified), and the backend exchanges that for a normal JWT session (`user.generateAuthToken()`); there is no email/password/OTP login of any kind. Signing in with a phone number that already matches an existing (not-yet-claimed) account attaches that account to the Firebase identity one-time, rather than creating a duplicate — see **[docs/FIREBASE_AUTH.md](docs/FIREBASE_AUTH.md)** for the full account model, the claim/link rule, setup, and costs. Also: cart, wishlist, saved addresses, product reviews with verified-purchase detection, coupons, full order lifecycle (PENDING → CONFIRMED → SHIPPED → DELIVERED, plus RETURN_REQUESTED/RETURNED/REFUNDED), Stripe Checkout with webhook-confirmed payment, admin product CRUD with Cloudinary image upload, admin order/return management, and an analytics dashboard (revenue trend, top products, low-stock alerts) built with `recharts`.
 
 ### Premium UI
 
@@ -55,10 +55,9 @@ server/                         Node.js + Express (ESM)
 │   ├── ai/                     client.js (Gemini wrapper) + one file per AI feature
 │   ├── pricingService.js       Server-authoritative order total calculation (paise-based)
 │   ├── inventoryService.js     Atomic stock reservation/restoration + low-stock alerts
-│   ├── emailService.js         nodemailer wrapper (no-ops cleanly if SMTP unset)
+│   ├── emailService.js         Resend SDK wrapper for order emails (no-ops cleanly if RESEND_API_KEY unset)
 │   ├── stripeClient.js         Shared Stripe client (null if unconfigured)
-│   ├── otpService.js           OTP generation/hashing/verification (shared by signup, login 2FA, password reset)
-│   ├── pendingRegistrationService.js  Holds registration details until OTP verification creates the real User
+│   ├── firebasePhoneAuthService.js  Verifies Firebase ID tokens; finds/claims/creates the User for a session
 │   ├── sellerDocumentService.js  Cloudinary `authenticated` uploads + on-demand signed URLs
 │   ├── sellerTransactionService.js  Commission ledger writes (Stripe webhook → SellerTransaction)
 │   └── auditLogService.js      Append-only trail of sensitive admin actions
@@ -100,11 +99,11 @@ See [Environment Variables](#environment-variables) below for what each one does
 
 ```bash
 cd server
-node seeds/seedData.js                                   # 4 demo products + admin/customer accounts
-node seeds/seedAdmin.js <email> <password>                # promote/create an additional admin
+node seeds/seedData.js                                   # 4 demo products (wipes Users too — see below)
+node seeds/seedAdmin.js <phone-number>                    # promote an existing account (matched by phone) to admin
 ```
 
-`seedData.js` **wipes** Products/Users/Wishlists/Addresses in the target database — only run it against a dev database.
+`seedData.js` **wipes** Products/Users/Wishlists/Addresses in the target database — only run it against a dev database. It seeds no user accounts: sign in once through the app with Firebase Phone Auth to create an account, then run `seedAdmin.js` with that same phone number to promote it.
 
 Generate a payout encryption key (required before any seller submits bank details — see [docs/MARKETPLACE.md](docs/MARKETPLACE.md)):
 
@@ -149,6 +148,7 @@ Copy the webhook signing secret it prints into `server/.env` as `STRIPE_WEBHOOK_
 | `JWT_SECRET` | JWT signing secret |
 | `CLIENT_URL` | Frontend origin, used for CORS and Stripe redirect URLs |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Stripe payments — get test keys at [dashboard.stripe.com](https://dashboard.stripe.com) |
+| `FIREBASE_PROJECT_ID` / `_CLIENT_EMAIL` / `_PRIVATE_KEY` (backend) + `VITE_FIREBASE_API_KEY` / `_AUTH_DOMAIN` / `_PROJECT_ID` / `_APP_ID` (frontend) | Firebase Phone Authentication — the only sign-in method; see [docs/FIREBASE_AUTH.md](docs/FIREBASE_AUTH.md) for setup, costs, and the account-claim rules. Without these, `/auth/firebase/*` returns a clean 503 and no one can sign in. |
 
 ### Optional — each degrades gracefully if unset
 
@@ -156,12 +156,11 @@ Copy the webhook signing secret it prints into `server/.env` as `STRIPE_WEBHOOK_
 | --- | --- | --- |
 | `GEMINI_API_KEY` | All AI features (chat, search, recommendations, etc.) — pinned to free-tier Gemini Flash models, see [docs/AI.md](docs/AI.md); get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | `/ai/*` endpoints return a clean 503; the rest of the app is unaffected |
 | `CLOUDINARY_CLOUD_NAME` / `_API_KEY` / `_API_SECRET` | Admin product image upload | Upload endpoint returns 503; products can still be created with externally-hosted image URLs |
-| `SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` | Real order/status emails, and OTP delivery (signup verification, login 2FA, password reset) — see [docs/EMAIL.md](docs/EMAIL.md) for provider setup | Order emails are logged instead of sent; OTP codes show in a dev-only UI banner in non-production (never in production — see below) |
+| `RESEND_API_KEY` | Real order/status emails via [Resend](https://resend.com) — see [docs/EMAIL.md](docs/EMAIL.md) for setup, including the required sending-domain verification | Order emails are logged instead of sent; nothing else is affected (there is no OTP/account email of any kind) |
 | `PAYOUT_ENCRYPTION_KEY` | Encrypts seller bank account/IFSC at rest (AES-256-GCM) — see [docs/MARKETPLACE.md](docs/MARKETPLACE.md) | Any endpoint that would store a seller's payout details fails closed with a 503 rather than storing anything insecurely |
 | `MARKETPLACE_DEFAULT_COMMISSION_PERCENT` | Default commission percentage applied to seller sales (a per-seller override can be set directly on the `Seller` document) | Defaults to `0` if unset — sellers keep 100% of the ledgered (non-payout) amount |
-| `ADMIN_SIGNUP_CODE` | The **only** way to create an admin account through the public API — registering with a matching `adminCode` field grants `admin` instead of `customer`, checked server-side with a constant-time comparison. Never guessable/settable by the client otherwise. Keep this secret. | Admin self-registration is disabled entirely; admins can still be created via `seeds/seedAdmin.js` |
 
-Full list with defaults: [`server/.env.example`](server/.env.example) and [`client/.env.example`](client/.env.example). Email/OTP setup and testing: [docs/EMAIL.md](docs/EMAIL.md). Marketplace/seller setup: [docs/MARKETPLACE.md](docs/MARKETPLACE.md).
+Full list with defaults: [`server/.env.example`](server/.env.example) and [`client/.env.example`](client/.env.example). Order-email setup and testing: [docs/EMAIL.md](docs/EMAIL.md). Marketplace/seller setup: [docs/MARKETPLACE.md](docs/MARKETPLACE.md). Phone auth setup: [docs/FIREBASE_AUTH.md](docs/FIREBASE_AUTH.md).
 
 ---
 
@@ -185,7 +184,7 @@ cd server && npm test   # vitest + supertest + mongodb-memory-server (spins up a
 cd client && npm test   # vitest + @testing-library/react
 ```
 
-Backend tests cover: server-authoritative pricing (GST, shipping thresholds, coupon caps), the full order-creation flow (stock reservation/rollback, auth gating), the Stripe webhook handler (mocked Stripe client — no live API calls), auth middleware, the AI graceful-degradation contract, and the full marketplace surface — seller onboarding/admin-review lifecycle (including illegal-status-transition rejection), payout-field encryption, cross-seller data isolation on products/orders, commission-ledger math, and ledger reversal on refund. They run with `GEMINI_API_KEY`/`STRIPE_SECRET_KEY`/SMTP/Cloudinary all intentionally unset, to exercise the fallback paths by default; `server/tests/aiClient.test.js` separately mocks the Gemini SDK to test the real request/response translation without a live key.
+Backend tests cover: server-authoritative pricing (GST, shipping thresholds, coupon caps), the full order-creation flow (stock reservation/rollback, auth gating), the Stripe webhook handler (mocked Stripe client — no live API calls), auth middleware, Firebase Phone Auth sign-in (new account, returning user, claiming an existing unclaimed account, rejected/deactivated cases), the AI graceful-degradation contract, and the full marketplace surface — seller onboarding/admin-review lifecycle (including illegal-status-transition rejection), payout-field encryption, cross-seller data isolation on products/orders, commission-ledger math, and ledger reversal on refund. They run with `GEMINI_API_KEY`/`STRIPE_SECRET_KEY`/`RESEND_API_KEY`/Cloudinary/`FIREBASE_*` all intentionally unset, to exercise the fallback paths by default; `server/tests/aiClient.test.js`, `server/tests/emailDelivery.test.js`, and `server/tests/firebaseAuth.test.js` separately mock the Gemini, Resend, and Firebase Admin SDKs to test the real request/response handling without live credentials.
 
 ---
 
