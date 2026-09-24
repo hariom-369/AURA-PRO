@@ -38,7 +38,7 @@ export default function AppRouter() {
         <Route path="/cart" element={<Cart />} />
         <Route path="/compare" element={<Compare />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Navigate to="/login" replace />} />
+        <Route path="/register" element={<Navigate to="/login" state={{ mode: 'signup' }} replace />} />
         <Route path="/forgot-password" element={<Navigate to="/login" replace />} />
         <Route path="/sell" element={<BecomeASeller />} />
 

@@ -191,6 +191,67 @@ describe('Firebase phone auth — sign-in', () => {
   });
 });
 
+describe('Firebase phone auth — optional `name` at signup', () => {
+  it('uses the supplied name for a brand-new account instead of the placeholder', async () => {
+    verifyIdTokenMock.mockResolvedValue({ uid: 'firebase-uid-10', phone_number: '+19995550010' });
+
+    const res = await request(app)
+      .post('/api/v1/auth/firebase/phone-login')
+      .send({ idToken: 'valid-token', name: 'Priya Sharma' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.user.name).toBe('Priya Sharma');
+    const user = await User.findOne({ firebaseUid: 'firebase-uid-10' });
+    expect(user.name).toBe('Priya Sharma');
+  });
+
+  it('falls back to the placeholder name when none is supplied on signup', async () => {
+    verifyIdTokenMock.mockResolvedValue({ uid: 'firebase-uid-11', phone_number: '+19995550011' });
+
+    const res = await request(app).post('/api/v1/auth/firebase/phone-login').send({ idToken: 'valid-token' });
+
+    expect(res.body.data.user.name).toBe('AURA PRO Customer');
+  });
+
+  it('ignores a supplied name on a returning login — an existing account can never be renamed via login', async () => {
+    verifyIdTokenMock.mockResolvedValue({ uid: 'firebase-uid-12', phone_number: '+19995550012' });
+    await request(app).post('/api/v1/auth/firebase/phone-login').send({ idToken: 't1', name: 'Original Name' });
+
+    const res = await request(app)
+      .post('/api/v1/auth/firebase/phone-login')
+      .send({ idToken: 't2', name: 'Attempted Rename' });
+
+    expect(res.body.data.user.name).toBe('Original Name');
+  });
+
+  it('ignores a supplied name when claiming an existing unclaimed legacy account', async () => {
+    const legacyUser = await makeLegacyUser({ phone: '+19995550013', name: 'Legacy Owner' });
+    verifyIdTokenMock.mockResolvedValue({ uid: 'firebase-uid-13', phone_number: '+19995550013' });
+
+    const res = await request(app)
+      .post('/api/v1/auth/firebase/phone-login')
+      .send({ idToken: 'valid-token', name: 'Someone Else' });
+
+    expect(res.body.data.user.name).toBe('Legacy Owner');
+    expect((await User.findById(legacyUser._id)).name).toBe('Legacy Owner');
+  });
+
+  it('rejects a name over 150 characters with a validation error, before ever calling Firebase', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/firebase/phone-login')
+      .send({ idToken: 'valid-token', name: 'x'.repeat(151) });
+
+    expect(res.status).toBe(400);
+    expect(verifyIdTokenMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty-string name with a validation error', async () => {
+    const res = await request(app).post('/api/v1/auth/firebase/phone-login').send({ idToken: 'valid-token', name: '' });
+
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('Firebase phone auth — single-step session', () => {
   it('issues a session directly with no OTP/pending step of any kind — Firebase already did the verification', async () => {
     verifyIdTokenMock.mockResolvedValue({ uid: 'firebase-uid-7', phone_number: '+19995550007' });

@@ -14,7 +14,11 @@ export default function BecomeASeller() {
   const navigate = useNavigate();
 
   const handleCta = () => {
-    if (!user) return navigate('/login', { state: { from: { pathname: '/sell/onboarding' } } });
+    if (!user) {
+      return navigate('/login', {
+        state: { from: { pathname: '/sell/onboarding' }, role: 'seller', mode: 'signup' },
+      });
+    }
     if (application) return navigate('/sell/status');
     navigate('/sell/onboarding');
   };

@@ -52,7 +52,7 @@ export async function verifyFirebaseIdToken(idToken) {
 // to an account with no other login path left — an already-claimed account
 // (firebaseUid already set) is never touched by this branch. See
 // docs/FIREBASE_AUTH.md for the full rationale.
-export async function findOrCreateUserFromFirebase({ uid, phoneNumber }) {
+export async function findOrCreateUserFromFirebase({ uid, phoneNumber, name }) {
   const existing = await User.findOne({ firebaseUid: uid });
   if (existing) {
     if (!existing.isActive) {
@@ -88,9 +88,12 @@ export async function findOrCreateUserFromFirebase({ uid, phoneNumber }) {
 
   // Phone sign-up never grants admin — role always defaults to 'customer'
   // regardless of anything the client sends (nothing client-supplied reaches
-  // this function at all).
+  // this function at all). `name` is the one client-supplied value used
+  // here, and only here — a brand-new account with no name on file yet; it
+  // is never applied to the existing/claim branches above, so a login can
+  // never rename someone else's (or your own past) account.
   const user = await User.create({
-    name: 'AURA PRO Customer',
+    name: name?.trim() || 'AURA PRO Customer',
     phone: phoneNumber,
     firebaseUid: uid,
     phoneVerified: true,

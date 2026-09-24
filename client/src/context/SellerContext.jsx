@@ -18,12 +18,18 @@ export const SellerProvider = ({ children }) => {
     if (!user) {
       setApplication(null);
       setLoading(false);
-      return Promise.resolve();
+      return Promise.resolve(null);
     }
     setLoading(true);
     return getSellerApplication()
-      .then(setApplication)
-      .catch(() => setApplication(null))
+      .then((app) => {
+        setApplication(app);
+        return app;
+      })
+      .catch(() => {
+        setApplication(null);
+        return null;
+      })
       .finally(() => setLoading(false));
   }, [user]);
 

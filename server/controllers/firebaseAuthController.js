@@ -25,12 +25,14 @@ export const firebaseAuthStatus = asyncHandler(async (req, res) => {
 //          and the "never auto-merge" rule this enforces.
 // @route   POST /api/v1/auth/firebase/phone-login
 export const firebasePhoneLogin = asyncHandler(async (req, res) => {
-  const { idToken } = req.body;
+  const { idToken, name } = req.body;
 
   let user;
   try {
     const { uid, phoneNumber } = await verifyFirebaseIdToken(idToken);
-    user = await findOrCreateUserFromFirebase({ uid, phoneNumber });
+    // `name` is only ever applied to a brand-new account — see
+    // findOrCreateUserFromFirebase. It is never a role/permission field.
+    user = await findOrCreateUserFromFirebase({ uid, phoneNumber, name });
   } catch (error) {
     rethrow(error);
   }
