@@ -18,7 +18,7 @@ process.env.MARKETPLACE_DEFAULT_COMMISSION_PERCENT = process.env.MARKETPLACE_DEF
 // in this setupFile (which vitest guarantees runs before test files are
 // imported), permanently wins over whatever real credentials later end up
 // in server/.env — tests can never silently start hitting real Resend/Stripe/
-// Gemini/Cloudinary/Firebase, no matter what gets configured for local dev.
+// Gemini/Cloudinary/Google/Turnstile, no matter what gets configured for local dev.
 process.env.RESEND_API_KEY = '';
 process.env.STRIPE_SECRET_KEY = '';
 process.env.STRIPE_WEBHOOK_SECRET = '';
@@ -26,9 +26,8 @@ process.env.GEMINI_API_KEY = '';
 process.env.CLOUDINARY_CLOUD_NAME = '';
 process.env.CLOUDINARY_API_KEY = '';
 process.env.CLOUDINARY_API_SECRET = '';
-process.env.FIREBASE_PROJECT_ID = '';
-process.env.FIREBASE_CLIENT_EMAIL = '';
-process.env.FIREBASE_PRIVATE_KEY = '';
+process.env.GOOGLE_CLIENT_ID = '';
+process.env.TURNSTILE_SECRET_KEY = '';
 
 let mongod;
 

@@ -176,6 +176,25 @@ export const sendOrderStatusEmail = async (order, customerEmail, note = '') => {
   });
 };
 
+export const sendPasswordResetEmail = async (email, resetUrl) => {
+  const body = `
+    <h2 style="margin: 0 0 8px; font-size: 20px; color: #18181b;">Reset your password</h2>
+    <p style="margin: 0 0 20px; font-size: 14px; color: #71717a; line-height: 1.6;">
+      We received a request to reset your AURA PRO password. Click the button below to choose a new one.
+      If you didn't request this, you can safely ignore this email — your password won't be changed.
+    </p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td align="center">
+          <a href="${resetUrl}" style="display: inline-block; background-color: ${BRAND_COLOR}; color: #ffffff; font-size: 14px; font-weight: 700; padding: 12px 28px; border-radius: 8px; text-decoration: none;">Reset Password</a>
+        </td>
+      </tr>
+    </table>
+    <p style="margin: 20px 0 0; font-size: 13px; color: #a1a1aa; text-align: center;">This link expires in 30 minutes and can only be used once.</p>
+  `;
+  return sendEmail({ to: email, subject: 'Reset your password — AURA PRO', html: renderEmailLayout({ bodyHtml: body }) });
+};
+
 export const sendLowStockAlertEmail = async (adminEmail, product) => {
   const body = `
     <h2 style="margin: 0 0 12px; font-size: 20px; color: #dc2626;">Low Stock Alert</h2>

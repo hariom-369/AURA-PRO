@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import API from '../api/axios';
+import * as authService from '../services/authService';
+import { getToken, setToken as persistToken, clearToken } from '../utils/tokenStorage';
 
 const AuthContext = createContext();
 
@@ -7,16 +9,16 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Restore user session on app load if token exists
+  // Restore user session on app load if a token exists (either storage).
   useEffect(() => {
     const fetchUser = async () => {
-      const token = localStorage.getItem('token');
+      const token = getToken();
       if (token) {
         try {
           const { data } = await API.get('/auth/me');
           setUser(data.data);
         } catch {
-          localStorage.removeItem('token');
+          clearToken();
           setUser(null);
         }
       }
@@ -25,22 +27,42 @@ export const AuthProvider = ({ children }) => {
     fetchUser();
   }, []);
 
-  const applySession = (data) => {
-    localStorage.setItem('token', data.token);
+  const applySession = (data, { rememberMe = false } = {}) => {
+    persistToken(data.token, { rememberMe });
     setUser(data.user);
   };
 
-  // Firebase Phone Auth's own verification already confirmed the user (see
-  // firebaseAuthService.js's confirmPhoneVerificationCode, which returns
-  // { user, token }) — this is the single integration point every session,
-  // new or returning, goes through.
-  const completeFirebasePhoneLogin = (data) => {
-    applySession(data);
+  const login = async (payload) => {
+    const data = await authService.login(payload);
+    applySession(data, { rememberMe: payload.rememberMe });
     return data;
   };
 
+  // A fresh signup implies "keep me signed in" — no remember-me checkbox on
+  // that form, matching how most consumer signup flows behave.
+  const register = async (payload) => {
+    const data = await authService.register(payload);
+    applySession(data, { rememberMe: true });
+    return data;
+  };
+
+  const loginWithGoogle = async (idToken) => {
+    const data = await authService.googleAuth(idToken);
+    applySession(data, { rememberMe: true });
+    return data;
+  };
+
+  // Links Google to the ALREADY-authenticated account — the user proved who
+  // they are via their existing session first; this never creates or
+  // switches a session, only updates the current one's linked-provider info.
+  const linkGoogleAccount = async (idToken) => {
+    const updated = await authService.linkGoogleAccount(idToken);
+    setUser((prev) => (prev ? { ...prev, ...updated } : updated));
+    return updated;
+  };
+
   const logout = () => {
-    localStorage.removeItem('token');
+    clearToken();
     setUser(null);
   };
 
@@ -49,7 +71,7 @@ export const AuthProvider = ({ children }) => {
   const updateUser = (patch) => setUser((prev) => (prev ? { ...prev, ...patch } : prev));
 
   return (
-    <AuthContext.Provider value={{ user, loading, logout, updateUser, completeFirebasePhoneLogin }}>
+    <AuthContext.Provider value={{ user, loading, login, register, loginWithGoogle, linkGoogleAccount, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

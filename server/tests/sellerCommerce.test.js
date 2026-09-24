@@ -26,10 +26,9 @@ const SellerTransaction = (await import('../models/SellerTransaction.js')).defau
 const { getStripe } = await import('../services/stripeClient.js');
 const { stripeWebhook } = await import('../controllers/paymentController.js');
 
-// Sign-in is Firebase Phone Auth only. These commerce/payment tests don't
-// exercise auth at all, so a test user is created directly rather than going
-// through a real (mocked) Firebase login — same session shape
-// (generateAuthToken()) any login method produces.
+// These commerce/payment tests don't exercise auth at all, so a test user is
+// created directly rather than through the real register endpoint — same
+// session shape (generateAuthToken()) any login method produces.
 let userCounter = 0;
 async function registerCustomer() {
   userCounter += 1;
@@ -38,6 +37,7 @@ async function registerCustomer() {
     name: 'Buyer',
     email,
     phone: `91000000${String(userCounter).padStart(2, '0')}`,
+    password: 'password123',
   });
   return { token: user.generateAuthToken(), userId: user._id.toString(), email };
 }

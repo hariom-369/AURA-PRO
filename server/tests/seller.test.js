@@ -18,10 +18,9 @@ const Seller = (await import('../models/Seller.js')).default;
 const AuditLog = (await import('../models/AuditLog.js')).default;
 const { uploadSellerDocument } = await import('../services/sellerDocumentService.js');
 
-// Sign-in is Firebase Phone Auth only. These seller-onboarding tests don't
-// exercise auth at all, so a test user is created directly rather than going
-// through a real (mocked) Firebase login — same session shape
-// (generateAuthToken()) any login method produces.
+// These seller-onboarding tests don't exercise auth at all, so a test user
+// is created directly rather than through the real register endpoint — same
+// session shape (generateAuthToken()) any login method produces.
 let userCounter = 0;
 async function registerCustomer() {
   userCounter += 1;
@@ -30,6 +29,7 @@ async function registerCustomer() {
     name: 'Applicant',
     email,
     phone: `90000000${String(userCounter).padStart(2, '0')}`,
+    password: 'password123',
   });
   return { token: user.generateAuthToken(), userId: user._id.toString(), email };
 }

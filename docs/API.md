@@ -4,15 +4,20 @@ Base URL: `http://localhost:5000/api/v1` (dev). All responses follow `{ statusCo
 
 ## Auth
 
-Sign-in is Firebase Phone Authentication only — see [FIREBASE_AUTH.md](FIREBASE_AUTH.md). There is no email/password/OTP login.
+Email/password and Google Sign-In — see [AUTHENTICATION.md](AUTHENTICATION.md) for the full account model, session strategy, and bot-protection design.
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET | `/auth/firebase/status` | Public | `{ available }` — whether Firebase is configured |
-| POST | `/auth/firebase/phone-login` | Public | `{ idToken }` — a Firebase ID token, exchanged for `{ user, token }` |
+| POST | `/auth/register` | Public (Turnstile) | `{ name, email, password, confirmPassword, acceptedTerms, turnstileToken? }` → `{ user, token }` |
+| POST | `/auth/login` | Public (Turnstile) | `{ email, password, rememberMe?, turnstileToken? }` → `{ user, token }` — generic error on any failure (never reveals whether the email exists) |
+| POST | `/auth/forgot-password` | Public (Turnstile) | `{ email, turnstileToken? }` — always the same generic response, regardless of whether the email exists |
+| POST | `/auth/reset-password` | Public | `{ token, password, confirmPassword }` — single-use, 30-minute-expiry token from the reset email |
+| POST | `/auth/google` | Public | `{ idToken }` — a Google Identity Services ID token, exchanged for `{ user, token }` |
 | GET | `/auth/me` | User | |
 | PATCH | `/auth/me` | User | `{ name?, phone? }` |
 | POST | `/auth/me/avatar` | User | multipart `avatar` field → Cloudinary |
+| POST | `/auth/me/link-google` | User | `{ idToken }` — links Google to the already-authenticated account |
+| POST | `/auth/change-password` | User | `{ currentPassword, newPassword }` |
 
 ## Products
 | Method | Path | Auth | Notes |

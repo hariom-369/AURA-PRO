@@ -3,12 +3,14 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSeller } from '../context/SellerContext';
 import { useToast } from '../context/ToastContext';
-import { updateProfile, uploadAvatar } from '../services/authService';
+import { updateProfile, uploadAvatar, changePassword } from '../services/authService';
+import GoogleSignInButton from '../components/GoogleSignInButton';
+import PasswordStrengthMeter from '../components/PasswordStrengthMeter';
 
 const FALLBACK_AVATAR = 'https://api.dicebear.com/9.x/initials/svg?seed=';
 
 export default function Profile() {
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, linkGoogleAccount } = useAuth();
   const { status: sellerStatus } = useSeller();
   const { showToast } = useToast();
 
@@ -17,6 +19,13 @@ export default function Profile() {
   const [profileError, setProfileError] = useState('');
 
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+  const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '' });
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+
+  const [linkError, setLinkError] = useState('');
 
   if (!user) return null;
 
@@ -34,6 +43,33 @@ export default function Profile() {
       setProfileError(err.response?.data?.message || 'Could not update profile');
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const handlePasswordSubmit = async (e) => {
+    e.preventDefault();
+    setSavingPassword(true);
+    setPasswordError('');
+    setPasswordSuccess('');
+    try {
+      await changePassword(pwForm);
+      setPwForm({ currentPassword: '', newPassword: '' });
+      setPasswordSuccess('Password changed successfully');
+    } catch (err) {
+      setPasswordError(err.response?.data?.message || 'Could not change password');
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
+  const handleLinkGoogle = async (idToken) => {
+    setLinkError('');
+    try {
+      const updated = await linkGoogleAccount(idToken);
+      updateUser(updated);
+      showToast('Google account linked', 'success');
+    } catch (err) {
+      setLinkError(err.response?.data?.message || 'Could not link Google account');
     }
   };
 
@@ -140,6 +176,60 @@ export default function Profile() {
           {savingProfile ? 'Saving...' : 'Save Changes'}
         </button>
       </form>
+
+      <div className="mt-6 rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+        <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">Sign-in methods</h3>
+        <div className="mt-3 flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-2 text-sm dark:bg-zinc-950">
+          <span className="text-zinc-700 dark:text-zinc-200">Google account</span>
+          {user.hasGoogleLinked ? (
+            <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Linked</span>
+          ) : (
+            <span className="text-xs text-zinc-400">Not linked</span>
+          )}
+        </div>
+        {!user.hasGoogleLinked && (
+          <div className="mt-3">
+            {linkError && <p className="mb-2 text-sm text-rose-500">{linkError}</p>}
+            <GoogleSignInButton onCredential={handleLinkGoogle} onError={setLinkError} />
+          </div>
+        )}
+      </div>
+
+      {user.hasPassword && (
+        <form onSubmit={handlePasswordSubmit} className="mt-6 rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+          <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">Change Password</h3>
+          {passwordError && <p className="mt-2 text-sm text-rose-500">{passwordError}</p>}
+          {passwordSuccess && <p className="mt-2 text-sm text-emerald-500">{passwordSuccess}</p>}
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <input
+              type="password"
+              placeholder="Current password"
+              autoComplete="current-password"
+              value={pwForm.currentPassword}
+              onChange={(e) => setPwForm({ ...pwForm, currentPassword: e.target.value })}
+              className={inputClass}
+            />
+            <div>
+              <input
+                type="password"
+                placeholder="New password"
+                autoComplete="new-password"
+                value={pwForm.newPassword}
+                onChange={(e) => setPwForm({ ...pwForm, newPassword: e.target.value })}
+                className={`w-full ${inputClass}`}
+              />
+              <PasswordStrengthMeter password={pwForm.newPassword} />
+            </div>
+          </div>
+          <button
+            type="submit"
+            disabled={savingPassword || !pwForm.currentPassword || !pwForm.newPassword}
+            className="mt-4 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-bold text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+          >
+            {savingPassword ? 'Updating...' : 'Change Password'}
+          </button>
+        </form>
+      )}
     </div>
   );
 }

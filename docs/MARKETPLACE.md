@@ -77,6 +77,6 @@ All under `/api/v1/seller`, gated by `requireApprovedSeller`:
 
 ## Authorization model
 
-- `User.role` stays `enum: ['customer', 'admin']` — unchanged from before the marketplace feature. Admin accounts are only ever created via `seeds/seedAdmin.js` (promotes an existing account by phone number — see [FIREBASE_AUTH.md](FIREBASE_AUTH.md)); there is no client-selectable role anywhere, and no admin path via sign-in.
+- `User.role` stays `enum: ['customer', 'admin']` — unchanged from before the marketplace feature. Admin accounts are only ever created via `seeds/seedAdmin.js` (promotes an existing account by email — see [AUTHENTICATION.md](AUTHENTICATION.md)); there is no client-selectable role anywhere, and no admin path via registration, login, or Google sign-in.
 - Seller access is `Seller.status === 'approved'` (and not `'suspended'`), checked fresh from the database on every request by `requireApprovedSeller` — never inferred from a JWT claim or anything the client asserts.
 - A product/order body can never smuggle a different `seller` id: `productValidators.createProductSchema`/`updateProductSchema` don't define a `seller` field, and Zod's default "strip unknown keys" behavior removes it before the controller ever sees it. The real `seller` is always taken from `req.seller._id`, set by the auth middleware.

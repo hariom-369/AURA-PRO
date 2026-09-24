@@ -24,9 +24,9 @@ jobs:
       - run: npm test
         env:
           # Deliberately no GEMINI_API_KEY / STRIPE_SECRET_KEY / RESEND_API_KEY /
-          # CLOUDINARY_* / FIREBASE_* — the suite exercises each feature's
-          # graceful fallback path (and, for Firebase, its mocked-SDK tests)
-          # when these are unset, by design.
+          # CLOUDINARY_* / GOOGLE_CLIENT_ID / TURNSTILE_SECRET_KEY — the suite
+          # exercises each feature's graceful fallback path (and, for Google
+          # sign-in, its mocked-SDK tests) when these are unset, by design.
           JWT_SECRET: ci-test-secret
           NODE_ENV: test
 

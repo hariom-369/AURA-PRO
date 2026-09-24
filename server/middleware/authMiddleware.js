@@ -14,11 +14,6 @@ export const protect = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (decoded.type === 'otp_pending') {
-      // Defense in depth: a pending OTP session token must never grant real
-      // access, even though it already lacks the `id` claim this code reads.
-      throw new ApiError(401, 'This token is not valid for authentication.');
-    }
     const user = await User.findById(decoded.id).select('-password');
 
     if (!user) {

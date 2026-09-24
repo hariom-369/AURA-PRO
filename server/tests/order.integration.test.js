@@ -4,12 +4,11 @@ import app from '../app.js';
 import Product from '../models/Product.js';
 import User from '../models/User.js';
 
-// Sign-in is Firebase Phone Auth only. These order/cart tests don't exercise
-// auth at all, so a test user is created directly rather than going through
-// a real (mocked) Firebase login — same session shape (generateAuthToken())
-// any login method produces.
+// These order/cart tests don't exercise auth at all, so a test user is
+// created directly rather than through the real register endpoint — same
+// session shape (generateAuthToken()) any login method produces.
 async function registerUser(email = 'buyer@example.com') {
-  const user = await User.create({ name: 'Buyer', email, phone: '9876543210' });
+  const user = await User.create({ name: 'Buyer', email, phone: '9876543210', password: 'password123' });
   return user.generateAuthToken();
 }
 

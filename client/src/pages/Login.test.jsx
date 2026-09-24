@@ -2,22 +2,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AllProviders } from '../test/testUtils';
 
-vi.mock('../config/firebase', () => ({
-  isFirebaseConfigured: () => true,
-}));
-
-const sendPhoneVerificationCodeMock = vi.fn();
-const confirmPhoneVerificationCodeMock = vi.fn();
-vi.mock('../services/firebaseAuthService', () => ({
-  sendPhoneVerificationCode: (...args) => sendPhoneVerificationCodeMock(...args),
-  confirmPhoneVerificationCode: (...args) => confirmPhoneVerificationCodeMock(...args),
-  resetRecaptcha: vi.fn(),
-  isFirebaseConfigured: () => true,
-}));
-
-const getSellerApplicationMock = vi.fn();
-vi.mock('../services/sellerService', () => ({
-  getSellerApplication: (...args) => getSellerApplicationMock(...args),
+const loginMock = vi.fn();
+vi.mock('../services/authService', () => ({
+  login: (...args) => loginMock(...args),
+  register: vi.fn(),
+  googleAuth: vi.fn(),
+  linkGoogleAccount: vi.fn(),
+  forgotPassword: vi.fn(),
+  resetPassword: vi.fn(),
+  changePassword: vi.fn(),
+  updateProfile: vi.fn(),
+  uploadAvatar: vi.fn(),
 }));
 
 const navigateMock = vi.fn();
@@ -28,125 +23,90 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
 const { default: Login } = await import('./Login');
 
-async function verifyPhoneFlow() {
-  const nameField = screen.queryByLabelText(/full name/i);
-  if (nameField) fireEvent.change(nameField, { target: { value: 'Test User' } });
-  fireEvent.change(screen.getByLabelText(/mobile number/i), { target: { value: '9876543210' } });
-  fireEvent.click(screen.getByRole('button', { name: /continue/i }));
-  await screen.findByText(/enter the code/i);
-
-  fireEvent.change(screen.getByPlaceholderText('000000'), { target: { value: '123456' } });
-  fireEvent.click(screen.getByRole('button', { name: /^verify$/i }));
-}
-
 describe('Login page', () => {
   beforeEach(() => {
-    sendPhoneVerificationCodeMock.mockReset().mockResolvedValue({ confirm: vi.fn() });
-    confirmPhoneVerificationCodeMock.mockReset().mockResolvedValue({
-      user: { _id: 'u1', name: 'AURA PRO Customer', role: 'customer' },
-      token: 'jwt-token',
-    });
-    getSellerApplicationMock.mockReset().mockResolvedValue(null);
+    loginMock.mockReset();
     navigateMock.mockReset();
     localStorage.clear();
+    sessionStorage.clear();
   });
 
-  it('shows role selection first, with no phone form yet', () => {
+  it('renders the email/password form, Google divider, and links', () => {
     render(<Login />, { wrapper: AllProviders });
 
-    expect(screen.getByRole('button', { name: /shop on aura pro/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sell on aura pro/i })).toBeInTheDocument();
-    expect(screen.queryByLabelText(/mobile number/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /forgot password/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /create an account/i })).toBeInTheDocument();
+    expect(screen.getByText('or')).toBeInTheDocument();
   });
 
-  it('reveals the phone form, defaulted to India, after choosing Buyer', () => {
+  it('toggles password visibility', () => {
     render(<Login />, { wrapper: AllProviders });
+    const passwordInput = screen.getByLabelText(/^password$/i);
+    expect(passwordInput).toHaveAttribute('type', 'password');
 
-    fireEvent.click(screen.getByRole('button', { name: /shop on aura pro/i }));
-
-    expect(screen.getByLabelText(/mobile number/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/country calling code/i)).toHaveValue('IN');
+    fireEvent.click(screen.getByLabelText(/show password/i));
+    expect(passwordInput).toHaveAttribute('type', 'text');
   });
 
-  it('shows the Full name field only in "Create account" mode', () => {
-    render(<Login />, { wrapper: AllProviders });
-    fireEvent.click(screen.getByRole('button', { name: /shop on aura pro/i }));
-
-    expect(screen.queryByLabelText(/full name/i)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /create account/i }));
-    expect(screen.getByLabelText(/full name/i)).toBeInTheDocument();
-  });
-
-  it('"Change account type" returns to the role picker', () => {
-    render(<Login />, { wrapper: AllProviders });
-    fireEvent.click(screen.getByRole('button', { name: /shop on aura pro/i }));
-
-    fireEvent.click(screen.getByRole('button', { name: /change account type/i }));
-
-    expect(screen.getByRole('button', { name: /shop on aura pro/i })).toBeInTheDocument();
-    expect(screen.queryByLabelText(/mobile number/i)).not.toBeInTheDocument();
-  });
-
-  it('preselects the role and signup mode from route state (e.g. from "Start selling")', () => {
+  it('signs in successfully and redirects to the intended destination', async () => {
+    loginMock.mockResolvedValue({ user: { _id: 'u1', name: 'Test', role: 'customer' }, token: 'jwt-token' });
     render(<Login />, {
-      wrapper: (props) => <AllProviders {...props} initialEntries={[{ pathname: '/login', state: { role: 'seller', mode: 'signup' } }]} />,
+      wrapper: (props) => <AllProviders {...props} initialEntries={[{ pathname: '/login', state: { from: { pathname: '/checkout' } } }]} />,
     });
 
-    expect(screen.queryByRole('button', { name: /shop on aura pro/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /create account/i })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByLabelText(/full name/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/email address/i), { target: { value: 'user@example.com' } });
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'CorrectHorse1' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    await waitFor(() => expect(loginMock).toHaveBeenCalledWith({
+      email: 'user@example.com',
+      password: 'CorrectHorse1',
+      rememberMe: false,
+      turnstileToken: '',
+    }));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/checkout'));
+    expect(sessionStorage.getItem('token')).toBe('jwt-token');
   });
 
-  it('redirects a buyer to home after a successful login', async () => {
+  it('stores the token in localStorage when "remember me" is checked', async () => {
+    loginMock.mockResolvedValue({ user: { _id: 'u1', name: 'Test', role: 'customer' }, token: 'jwt-token' });
     render(<Login />, { wrapper: AllProviders });
-    fireEvent.click(screen.getByRole('button', { name: /shop on aura pro/i }));
 
-    await verifyPhoneFlow();
+    fireEvent.change(screen.getByLabelText(/email address/i), { target: { value: 'user@example.com' } });
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'CorrectHorse1' } });
+    fireEvent.click(screen.getByLabelText(/remember me/i));
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
-    await waitFor(() => expect(navigateMock).not.toHaveBeenCalledWith(expect.stringContaining('/sell')));
-    expect(localStorage.getItem('token')).toBe('jwt-token');
+    await waitFor(() => expect(localStorage.getItem('token')).toBe('jwt-token'));
+    expect(sessionStorage.getItem('token')).toBeNull();
   });
 
-  it('redirects an approved seller straight to the seller dashboard', async () => {
-    getSellerApplicationMock.mockResolvedValue({ status: 'approved' });
+  it('shows a generic error message and preserves the entered email on failure', async () => {
+    loginMock.mockRejectedValue({ response: { data: { message: 'Invalid email or password.' } } });
     render(<Login />, { wrapper: AllProviders });
-    fireEvent.click(screen.getByRole('button', { name: /sell on aura pro/i }));
 
-    await verifyPhoneFlow();
+    fireEvent.change(screen.getByLabelText(/email address/i), { target: { value: 'user@example.com' } });
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'WrongPassword1' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/seller', { replace: true }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/invalid email or password/i);
+    expect(screen.getByLabelText(/email address/i)).toHaveValue('user@example.com');
   });
 
-  it('redirects a seller with a pending application to the status page', async () => {
-    getSellerApplicationMock.mockResolvedValue({ status: 'under_review' });
+  it('disables the submit button while a request is in flight, preventing duplicate submissions', async () => {
+    let resolveLogin;
+    loginMock.mockReturnValue(new Promise((resolve) => { resolveLogin = resolve; }));
     render(<Login />, { wrapper: AllProviders });
-    fireEvent.click(screen.getByRole('button', { name: /sell on aura pro/i }));
 
-    await verifyPhoneFlow();
+    fireEvent.change(screen.getByLabelText(/email address/i), { target: { value: 'user@example.com' } });
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'CorrectHorse1' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/sell/status', { replace: true }));
-  });
-
-  it('sends a new seller straight into onboarding when they explicitly chose "Create account"', async () => {
-    getSellerApplicationMock.mockResolvedValue(null);
-    render(<Login />, { wrapper: AllProviders });
-    fireEvent.click(screen.getByRole('button', { name: /sell on aura pro/i }));
-    fireEvent.click(screen.getByRole('button', { name: /create account/i }));
-
-    await verifyPhoneFlow();
-
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/sell/onboarding', { replace: true }));
-  });
-
-  it('sends a seller with no application to the status page (not silently into onboarding) when they just chose "Sign in"', async () => {
-    getSellerApplicationMock.mockResolvedValue(null);
-    render(<Login />, { wrapper: AllProviders });
-    fireEvent.click(screen.getByRole('button', { name: /sell on aura pro/i }));
-    fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }));
-
-    await verifyPhoneFlow();
-
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/sell/status', { replace: true }));
+    expect(screen.getByRole('button', { name: /signing in/i })).toBeDisabled();
+    resolveLogin({ user: { _id: 'u1', name: 'Test', role: 'customer' }, token: 't' });
+    await waitFor(() => expect(navigateMock).toHaveBeenCalled());
   });
 });

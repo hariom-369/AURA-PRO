@@ -1,6 +1,6 @@
 # Email (Resend)
 
-AURA PRO sends **order notification emails only** — confirmation, status updates, and low-stock alerts to admins. These go through `server/services/emailService.js`, which wraps the official [Resend](https://resend.com) Node.js SDK. There is no OTP or account email of any kind — sign-in is [Firebase Phone Authentication](FIREBASE_AUTH.md), which never involves email.
+AURA PRO sends order notification emails (confirmation, status updates, low-stock alerts to admins) **and password-reset emails**. These go through `server/services/emailService.js`, which wraps the official [Resend](https://resend.com) Node.js SDK. See [docs/AUTHENTICATION.md](AUTHENTICATION.md) for the full sign-in system — email/password and Google Sign-In.
 
 This app previously used Gmail SMTP. It was replaced because Gmail SMTP connections from most cloud hosts (including Render) are unreliable — frequently rejected outright (`ENETUNREACH`, connection timeouts) since providers commonly block outbound SMTP ports (25/465/587) on shared infrastructure to fight spam. Resend sends over a normal HTTPS API call, which isn't affected by that class of problem.
 
@@ -34,7 +34,7 @@ Resend will not deliver mail from an address on a domain it hasn't verified you 
 
 ## Local development without Resend
 
-If you haven't configured `RESEND_API_KEY`, the app works completely normally — order confirmation/status/low-stock emails are simply logged (`email_skipped_not_configured`) instead of sent. Nothing about sign-in, checkout, or any other flow depends on email being configured, since there is no OTP or account-verification email anymore.
+If you haven't configured `RESEND_API_KEY`, order confirmation/status/low-stock emails are simply logged (`email_skipped_not_configured`) instead of sent — checkout is unaffected either way. **Password reset is the one flow that does depend on this**: without it, `forgot-password` still responds successfully (its response is always the same generic message, by design — see docs/AUTHENTICATION.md), but no email actually arrives, so you can't complete a reset locally without a real `RESEND_API_KEY`. Register/login/Google sign-in don't depend on email at all.
 
 ## Testing real delivery
 
@@ -63,7 +63,7 @@ Set these in your Render service's **Environment** tab:
 | `EMAIL_FROM_NAME` | `AURA PRO` (or your preferred display name) |
 | `NODE_ENV` | `production` |
 
-If order emails aren't arriving in production, check (in order): the domain verification status in the Resend dashboard, the `email_rejected_by_provider` / `email_send_failed` log lines (see below) for the actual Resend error, and that `EMAIL_FROM_ADDRESS` is really on the verified domain.
+If order emails — or password-reset emails — aren't arriving in production, check (in order): the domain verification status in the Resend dashboard, the `email_rejected_by_provider` / `email_send_failed` log lines (see below) for the actual Resend error, and that `EMAIL_FROM_ADDRESS` is really on the verified domain.
 
 ## Diagnostic logging
 
@@ -78,4 +78,4 @@ None of these ever report success unless Resend's own response confirms the mess
 
 ## A note on the test suite
 
-`server/tests/setup.js` forcibly blanks `RESEND_API_KEY`, `STRIPE_*`, `GEMINI_API_KEY`, `CLOUDINARY_*`, and `FIREBASE_*` before any test file is imported, regardless of what's configured in your real `server/.env`. This matters: `app.js` calls `dotenv.config()` at import time, and dotenv never overwrites a key that's already present in `process.env` — so once you configure real credentials for local development, the test suite needs to explicitly protect itself from picking them up, or `npm test` would start making real calls to your real Resend account on every run. `server/tests/emailDelivery.test.js` mocks the Resend SDK directly (`vi.mock('resend', ...)`) to test the request/response handling — including the "resolves with an error instead of throwing" case that's specific to how Resend's SDK behaves — without ever calling the real API.
+`server/tests/setup.js` forcibly blanks `RESEND_API_KEY`, `STRIPE_*`, `GEMINI_API_KEY`, `CLOUDINARY_*`, `GOOGLE_CLIENT_ID`, and `TURNSTILE_SECRET_KEY` before any test file is imported, regardless of what's configured in your real `server/.env`. This matters: `app.js` calls `dotenv.config()` at import time, and dotenv never overwrites a key that's already present in `process.env` — so once you configure real credentials for local development, the test suite needs to explicitly protect itself from picking them up, or `npm test` would start making real calls to your real Resend account on every run. `server/tests/emailDelivery.test.js` mocks the Resend SDK directly (`vi.mock('resend', ...)`) to test the request/response handling — including the "resolves with an error instead of throwing" case that's specific to how Resend's SDK behaves — without ever calling the real API. `server/tests/passwordReset.test.js` similarly mocks `sendPasswordResetEmail` at the service boundary.

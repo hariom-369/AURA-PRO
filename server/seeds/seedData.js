@@ -123,10 +123,9 @@ const seedDatabase = async () => {
 
     console.log('Cleared existing junk database records.');
 
-    // No demo users are seeded here — accounts only exist once someone signs
-    // in with Firebase Phone Auth (see services/firebasePhoneAuthService.js).
-    // To make a demo account an admin, sign in with it once, then run:
-    //   node seeds/seedAdmin.js <phone-number>
+    // No demo users are seeded here — register (or sign in with Google)
+    // through the app to create an account. To make one an admin, run:
+    //   node seeds/seedAdmin.js <email>
 
     // Use create() (not insertMany) so the pre-save hook derives basePriceInPaise,
     // discountPercentage, and primaryImage from the legacy display fields above.

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import ProtectedRoute from './ProtectedRoute';
 import AdminRoute from './AdminRoute';
@@ -10,6 +10,11 @@ import ProductDetail from '../pages/ProductDetail';
 import Cart from '../pages/Cart';
 import Checkout from '../pages/Checkout';
 import Login from '../pages/Login';
+import Register from '../pages/Register';
+import ForgotPassword from '../pages/ForgotPassword';
+import ResetPassword from '../pages/ResetPassword';
+import Terms from '../pages/Terms';
+import Privacy from '../pages/Privacy';
 import Orders from '../pages/Orders';
 import OrderDetail from '../pages/OrderDetail';
 import Wishlist from '../pages/Wishlist';
@@ -38,8 +43,11 @@ export default function AppRouter() {
         <Route path="/cart" element={<Cart />} />
         <Route path="/compare" element={<Compare />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Navigate to="/login" state={{ mode: 'signup' }} replace />} />
-        <Route path="/forgot-password" element={<Navigate to="/login" replace />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password/:token" element={<ResetPassword />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/privacy" element={<Privacy />} />
         <Route path="/sell" element={<BecomeASeller />} />
 
         <Route element={<ProtectedRoute />}>
